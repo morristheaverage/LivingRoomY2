@@ -278,6 +278,7 @@ function initArrayBuffer (gl, attribute, data, num, type) {
 	// Enable the assignment of the buffer object to the attribute variable
 	gl.enableVertexAttribArray(a_attribute);
 
+	console.log(gl.getParameter(gl.ARRAY_BUFFER_BINDING));
 	gl.bindBuffer(gl.ARRAY_BUFFER, null);
 
 	return true;
@@ -343,6 +344,7 @@ function popMatrix() { // Retrieve the matrix from the array
 }
 
 function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection) {
+	
 	thisLoop = new Date();
 	fps = 1000 / (thisLoop - lastLoop);
 	lastLoop = thisLoop;
