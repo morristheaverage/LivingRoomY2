@@ -30,9 +30,9 @@ var VSHADER_SOURCE =
 
 // Fragment shader program
 var FSHADER_SOURCE =
-  '#ifdef GL_ES\n' +
+//   '#ifdef GL_ES\n' +(should always be true according to documentation)
   'precision mediump float;\n' +
-  '#endif\n' +
+//   '#endif\n' +
   'varying vec4 v_Color;\n' +
   'void main() {\n' +
   '  gl_FragColor = v_Color;\n' +
@@ -146,7 +146,7 @@ function keydown(ev, gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDir
 }
 
 
-function initCubeVertexBuffers(gl, colour) {
+function initCubeVertexBuffers(gl, offset, colour) {
 	// Create a cube
 	//    v6----- v5
 	//   /|      /|
@@ -190,12 +190,12 @@ function initCubeVertexBuffers(gl, colour) {
 
 	// Indices of the vertices
 	var indices = new Uint8Array([
-		0, 1, 2,   0, 2, 3,    // front
-		4, 5, 6,   4, 6, 7,    // right
-		8, 9,10,   8,10,11,    // up
-		12,13,14,  12,14,15,    // left
-		16,17,18,  16,18,19,    // down
-		20,21,22,  20,22,23     // back
+		offset + 0, offset + 1, offset + 2,   offset + 0, offset + 2, offset + 3,    // front
+		offset + 4, offset + 5, offset + 6,   offset + 4, offset + 6, offset + 7,    // right
+		offset + 8, offset + 9,offset + 10,   offset + 8,offset + 10,offset + 11,    // up
+		offset + 12,offset + 13,offset + 14,  offset + 12,offset + 14,offset + 15,    // left
+		offset + 16,offset + 17,offset + 18,  offset + 16,offset + 18,offset + 19,    // down
+		offset + 20,offset + 21,offset + 22,  offset + 20,offset + 22,offset + 23     // back
 	]);
 
 
@@ -214,7 +214,12 @@ function initCubeVertexBuffers(gl, colour) {
 	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
 	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
 
-	return indices.length;
+	return {
+		vertices: vertices,
+		colors: colors,
+		normals: normals,
+		indices: indices
+	};
 }
 
 function initSquareVertexBuffers(gl) {
@@ -278,7 +283,6 @@ function initArrayBuffer (gl, attribute, data, num, type) {
 	// Enable the assignment of the buffer object to the attribute variable
 	gl.enableVertexAttribArray(a_attribute);
 
-	console.log(gl.getParameter(gl.ARRAY_BUFFER_BINDING));
 	gl.bindBuffer(gl.ARRAY_BUFFER, null);
 
 	return true;
@@ -457,12 +461,13 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection)
 	drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions, colour);
 	modelMatrix = popMatrix();
 
+	
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(-0.8 * w/2, -h/2, -0.6 * d/2);
 	modelMatrix.rotate(80, 0, 1, 0);
 	drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions, colour);
 	modelMatrix = popMatrix();
-
+	
 	// Now draw the sofa
 	dimensions.x = 1;
 	colour.g = 1;
@@ -471,6 +476,7 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection)
 	modelMatrix.rotate(180, 0, 1, 0);
 	drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions, colour);
 	modelMatrix = popMatrix();
+	
 
 }
 
@@ -561,8 +567,8 @@ function initSeatMatrices() {
 
 function drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions, colour) {
 	// Set the vertex coordinates and color (for the cube)
-	var nCube = initCubeVertexBuffers(gl, colour);
-	if (nCube < 0) {
+	var nCube = initCubeVertexBuffers(gl, 0, colour);
+	if (nCube.indices.length < 0) {
 		console.log('Failed to set the vertex information');
 		return;
 	}
@@ -573,13 +579,17 @@ function drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions, colour) {
 		pushMatrix(modelMatrix);
 		modelMatrix.concat(componentMatrix);
 		// console.log(modelMatrix);
-		drawshape(gl, u_ModelMatrix, u_NormalMatrix, nCube);
+		drawshape(gl, u_ModelMatrix, u_NormalMatrix, nCube.indices.length);
 		modelMatrix = popMatrix();
 	}
 }
 
 function setLightDirection(gl, u_LightDirection) {
 	var lightDirection = new Vector3([2.0, 3.0, 4.0]);
+	var lightMatrix = new Matrix4();
+	lightMatrix.setRotate(g_xAngle, 1, 0, 0);
+	lightMatrix.rotate(g_yAngle, 0, 1, 0);
+
 	var y_angle = Math.PI * g_yAngle / 180;
 	var x_angle = Math.PI * g_xAngle / 180;
 	var cy = Math.cos(y_angle);
@@ -595,6 +605,20 @@ function setLightDirection(gl, u_LightDirection) {
 		-x*sy*cx + y*sy + z*cx*cy
 	]);
 
+	// console.log(rotatedLightDir);
+	// console.log(transform({x: x, y: y, z: z}, lightMatrix));
+
 	rotatedLightDir.normalize();     // Normalize
 	gl.uniform3fv(u_LightDirection, rotatedLightDir.elements);
+}
+
+function transform(point, m) {
+	var elements = new Float32Array([point.x, point.y, point.z, 1,    0, 0, 0, 0,    0, 0, 0, 0,    0, 0, 0, 0]);
+	var pointMatrix = new Matrix4({elements: elements});
+	var transformation = m.concat(pointMatrix);
+	return {
+		x: transformation.elements[0],
+		y: transformation.elements[1],
+		z: transformation.elements[2],
+	};
 }
