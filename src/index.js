@@ -55,6 +55,14 @@ fpsElement.append(fpsNode);
 
 var seatMatrices = [];
 
+// A global object to contain buffer info
+var shapes = {
+	'wall': {color: {r: 1.0, g: 1.0, b: 1.0, alpha: 1.0}, type: 'square'},
+	'furniture': {color: {r: 1.0, g: 0.0, b: 0.0, alpha: 1.0}, type: 'cube'},
+	'water': {color: {r: 0.0, g: 0.5, b: 1.0, alpha: 0.5}, type: 'cube'},
+	'glass': {color: {r: 0.2, g: 0.2, b: 0.2, alpha: 0.1}, type: 'cube'}
+};
+
 function main() {
 	// Retrieve <canvas> element
 	var canvas = document.getElementById('webgl');
@@ -76,9 +84,9 @@ function main() {
 	gl.clearColor(0.0, 0.0, 0.0, 1.0);
 	gl.enable(gl.DEPTH_TEST);
 
-	// Enable face culling to 'look through walls'
-	gl.enable(gl.CULL_FACE);
-	gl.cullFace(gl.BACK);
+	// Enable transparency
+	gl.enable(gl.BLEND);
+	gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
 	// Clear color and depth buffer
 	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -116,6 +124,64 @@ function main() {
 	// Load seat data
 	initSeatMatrices();
 
+	// Preload all relevant shapes into the buffers
+	// 1-sqaures for walls
+	// 2-red cubes for furniture
+	// 3-blue water cube
+	// 4-clear glass cube
+
+	var shape;
+
+	var vertices = new Float32Array();
+	var colors = new Float32Array();
+	var normals = new Float32Array();
+	var indices = new Uint8Array();
+
+	var offset = indices.length;
+	for(var [key, value] of Object.entries(shapes)){
+		switch(value.type) {
+		case 'square':
+			shape = initSquareVertexBuffers(gl, offset, value.color);
+			break;
+		case 'cube':
+			shape = initCubeVertexBuffers(gl, offset, value.color);
+			break;
+		default:
+			console.log(shapes[i].type);
+			return;
+		}
+		console.log(shape);
+		vertices = float32concat(vertices, shape.vertices);
+		colors = float32concat(colors, shape.colors);
+		normals = float32concat(normals, shape.normals);
+
+		shapes[key]['offset'] = offset;
+		shapes[key]['n'] = shape.indices.length;
+		offset += shapes[key]['n'];
+		indices = uint8concat(indices, shape.indices);
+	}
+
+	console.log(indices.length);
+	console.log(shapes);
+
+	
+
+	// Write the vertex property to buffers (coordinates, colors and normals)
+	if (!initArrayBuffer(gl, 'a_Position', vertices, 3, gl.FLOAT)) return -1;
+	if (!initArrayBuffer(gl, 'a_Color', colors, 4, gl.FLOAT)) return -1;
+	if (!initArrayBuffer(gl, 'a_Normal', normals, 3, gl.FLOAT)) return -1;
+
+	// Write the indices to the buffer object
+	var indexBuffer = gl.createBuffer();
+	if (!indexBuffer) {
+		console.log('Failed to create the buffer object');
+		return false;
+	}
+
+	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+
+
 
 	document.onkeydown = function(ev){
 		keydown(ev, gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection);
@@ -145,6 +211,26 @@ function keydown(ev, gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDir
 	draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection);
 }
 
+function float32concat(first, second) {
+	var firstLength = first.length,
+		result = new Float32Array(firstLength + second.length);
+
+	result.set(first);
+	result.set(second, firstLength);
+
+	return result;
+}
+
+function uint8concat(first, second) {
+	var firstLength = first.length,
+		result = new Uint8Array(firstLength + second.length);
+
+	result.set(first);
+	result.set(second, firstLength);
+
+	return result;
+}
+
 
 function initCubeVertexBuffers(gl, offset, colour) {
 	// Create a cube
@@ -168,13 +254,14 @@ function initCubeVertexBuffers(gl, offset, colour) {
 	r = colour.r;
 	g = colour.g;
 	b = colour.b;
+	var alpha = colour.alpha;
 	var colors = new Float32Array([    // Colors
-		r, g, b,   r, g, b,   r, g, b,   r, g, b,     // v0-v1-v2-v3 front
-		r, g, b,   r, g, b,   r, g, b,   r, g, b,     // v0-v3-v4-v5 right
-		r, g, b,   r, g, b,   r, g, b,   r, g, b,     // v0-v5-v6-v1 up
-		r, g, b,   r, g, b,   r, g, b,   r, g, b,     // v1-v6-v7-v2 left
-		r, g, b,   r, g, b,   r, g, b,   r, g, b,     // v7-v4-v3-v2 down
-		r, g, b,   r, g, b,   r, g, b,   r, g, b      // v4-v7-v6-v5 back
+		r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,     // v0-v1-v2-v3 front
+		r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,     // v0-v3-v4-v5 right
+		r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,     // v0-v5-v6-v1 up
+		r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,     // v1-v6-v7-v2 left
+		r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,     // v7-v4-v3-v2 down
+		r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha      // v4-v7-v6-v5 back
 	]);
 
 
@@ -201,7 +288,7 @@ function initCubeVertexBuffers(gl, offset, colour) {
 
 	// Write the vertex property to buffers (coordinates, colors and normals)
 	if (!initArrayBuffer(gl, 'a_Position', vertices, 3, gl.FLOAT)) return -1;
-	if (!initArrayBuffer(gl, 'a_Color', colors, 3, gl.FLOAT)) return -1;
+	if (!initArrayBuffer(gl, 'a_Color', colors, 4, gl.FLOAT)) return -1;
 	if (!initArrayBuffer(gl, 'a_Normal', normals, 3, gl.FLOAT)) return -1;
 
 	// Write the indices to the buffer object
@@ -222,7 +309,118 @@ function initCubeVertexBuffers(gl, offset, colour) {
 	};
 }
 
-function initSquareVertexBuffers(gl) {
+function initFishtankVertexBuffers(gl, offset, colour) {
+	// Create a cube
+	//    v6----- v5
+	//   /|      /|
+	//  v1------v0|
+	//  | |     | |
+	//  |v10----|-v9
+	// v11------v8|
+	//  | |v7---|-|v4
+	//  |/      |/
+	//  v2------v3
+	var wtl = 0.0; // Water level
+	var gt = 0.01; // Glass thickness
+	var wbd = 0.5 - gt; // Water boundary
+	var vertices = new Float32Array([   // Coordinates
+		0.5, 0.5, 0.5,  -0.5, 0.5, 0.5,  -0.5,-0.5, 0.5,   0.5,-0.5, 0.5,  // v0-v1-v2-v3 front
+		0.5, 0.5, 0.5,   0.5,-0.5, 0.5,   0.5,-0.5,-0.5,   0.5, 0.5,-0.5,  // v0-v3-v4-v5 right
+		-0.5, 0.5, 0.5, -0.5, 0.5,-0.5,  -0.5,-0.5,-0.5,  -0.5,-0.5, 0.5,  // v1-v6-v7-v2 left
+		-0.5,-0.5,-0.5,  0.5,-0.5,-0.5,   0.5,-0.5, 0.5,  -0.5,-0.5, 0.5,  // v7-v4-v3-v2 down
+		0.5,-0.5,-0.5,  -0.5,-0.5,-0.5,  -0.5, 0.5,-0.5,   0.5, 0.5,-0.5,  // v4-v7-v6-v5 back
+		wbd, wtl, wbd,  -wbd, wtl, wbd,  -wbd,-wbd, wbd,   wbd,-wbd, wbd,  // v0-v1-v2-v3 front-water
+		wbd, wtl, wbd,   wbd,-wbd, wbd,   wbd,-wbd,-wbd,   wbd, wtl,-wbd,  // v0-v3-v4-v5 right-water
+		wbd, wtl, wbd,   wbd, wtl,-wbd,  -wbd, wtl,-wbd,  -wbd, wtl, wbd, // v0-v5-v6-v1 up-water
+		-wbd,wtl, wbd,  -wbd, wtl,-wbd,  -wbd,-wbd,-wbd,  -wbd,-wbd, wbd,  // v1-v6-v7-v2 left-water
+		-wbd,-wbd,-wbd,  wbd,-wbd,-wbd,   wbd,-wbd, wbd,  -wbd,-wbd, wbd,  // v7-v4-v3-v2 down-water
+		wbd,-wbd,-wbd,  -wbd,-wbd,-wbd,  -wbd, wtl,-wbd,   wbd, wtl,-wbd,  // v4-v7-v6-v5 back-water
+		
+	]);
+
+	var r, g, b, wr, wg, wb;
+	r = colour.r;
+	g = colour.g;
+	b = colour.b;
+	wr= 0;
+	wg= 0.5;
+	wb= 1;
+	var alpha = 0.3;
+	var walpha = 1;
+	var colors = new Float32Array([    // Colors
+		r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,     // v0-v1-v2-v3 front
+		r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,     // v0-v3-v4-v5 right
+		r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,     // v0-v5-v6-v1 up
+		r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,     // v1-v6-v7-v2 left
+		r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,     // v7-v4-v3-v2 down
+		r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,   r, g, b, alpha,     // v4-v7-v6-v5 back
+		wr, wg, wb, walpha,   wr, wg, wb, walpha,   wr, wg, wb, walpha,   wr, wg, wb, walpha,     // v0-v1-v2-v3 front-water
+		wr, wg, wb, walpha,   wr, wg, wb, walpha,   wr, wg, wb, walpha,   wr, wg, wb, walpha,     // v0-v3-v4-v5 right-water
+		wr, wg, wb, walpha,   wr, wg, wb, walpha,   wr, wg, wb, walpha,   wr, wg, wb, walpha,     // v0-v5-v6-v1 up-water
+		wr, wg, wb, walpha,   wr, wg, wb, walpha,   wr, wg, wb, walpha,   wr, wg, wb, walpha,     // v1-v6-v7-v2 left-water
+		wr, wg, wb, walpha,   wr, wg, wb, walpha,   wr, wg, wb, walpha,   wr, wg, wb, walpha,     // v7-v4-v3-v2 down-water
+		wr, wg, wb, walpha,   wr, wg, wb, walpha,   wr, wg, wb, walpha,   wr, wg, wb, walpha      // v4-v7-v6-v5 back-water
+	]);
+
+
+	var normals = new Float32Array([    // Normal
+		0.0, 0.0, 1.0,   0.0, 0.0, 1.0,   0.0, 0.0, 1.0,   0.0, 0.0, 1.0,  // v0-v1-v2-v3 front
+		1.0, 0.0, 0.0,   1.0, 0.0, 0.0,   1.0, 0.0, 0.0,   1.0, 0.0, 0.0,  // v0-v3-v4-v5 right
+		0.0, 1.0, 0.0,   0.0, 1.0, 0.0,   0.0, 1.0, 0.0,   0.0, 1.0, 0.0,  // v0-v5-v6-v1 up
+		-1.0, 0.0, 0.0,  -1.0, 0.0, 0.0,  -1.0, 0.0, 0.0,  -1.0, 0.0, 0.0,  // v1-v6-v7-v2 left
+		0.0,-1.0, 0.0,   0.0,-1.0, 0.0,   0.0,-1.0, 0.0,   0.0,-1.0, 0.0,  // v7-v4-v3-v2 down
+		0.0, 0.0,-1.0,   0.0, 0.0,-1.0,   0.0, 0.0,-1.0,   0.0, 0.0,-1.0,  // v4-v7-v6-v5 back
+		0.0, 0.0, 1.0,   0.0, 0.0, 1.0,   0.0, 0.0, 1.0,   0.0, 0.0, 1.0,  // v0-v1-v2-v3 front-water
+		1.0, 0.0, 0.0,   1.0, 0.0, 0.0,   1.0, 0.0, 0.0,   1.0, 0.0, 0.0,  // v0-v3-v4-v5 right-water
+		0.0, 1.0, 0.0,   0.0, 1.0, 0.0,   0.0, 1.0, 0.0,   0.0, 1.0, 0.0,  // v0-v5-v6-v1 up-water
+		-1.0, 0.0, 0.0,  -1.0, 0.0, 0.0,  -1.0, 0.0, 0.0,  -1.0, 0.0, 0.0,  // v1-v6-v7-v2 left-water
+		0.0,-1.0, 0.0,   0.0,-1.0, 0.0,   0.0,-1.0, 0.0,   0.0,-1.0, 0.0,  // v7-v4-v3-v2 down-water
+		0.0, 0.0,-1.0,   0.0, 0.0,-1.0,   0.0, 0.0,-1.0,   0.0, 0.0,-1.0   // v4-v7-v6-v5 back-water
+	]);
+
+
+	// Indices of the vertices
+	var indices = new Uint8Array([
+		0, 1, 2,   0, 2, 3,    // front
+		4, 5, 6,   4, 6, 7,    // right
+		8, 9,10,   8,10,11,    // left
+		12,13,14,  12,14,15,    // down
+		16,17,18,  16,18,19,    // back
+		20 + 0, 20 + 1, 20 + 2,   20 + 0, 20 + 2, 20 + 3,    // front
+		20 + 4, 20 + 5, 20 + 6,   20 + 4, 20 + 6, 20 + 7,    // right
+		20 + 8, 20 + 9,20 + 10,   20 + 8,20 + 10,20 + 11,    // up
+		20 + 12,20 + 13,20 + 14,  20 + 12,20 + 14,20 + 15,    // left
+		20 + 16,20 + 17,20 + 18,  20 + 16,20 + 18,20 + 19,    // down
+		20 + 20,20 + 21,20 + 22,  20 + 20,20 + 22,20 + 23     // back
+
+
+	]);
+
+
+	// Write the vertex property to buffers (coordinates, colors and normals)
+	if (!initArrayBuffer(gl, 'a_Position', vertices, 3, gl.FLOAT)) return -1;
+	if (!initArrayBuffer(gl, 'a_Color', colors, 4, gl.FLOAT)) return -1;
+	if (!initArrayBuffer(gl, 'a_Normal', normals, 3, gl.FLOAT)) return -1;
+
+	// Write the indices to the buffer object
+	var indexBuffer = gl.createBuffer();
+	if (!indexBuffer) {
+		console.log('Failed to create the buffer object');
+		return false;
+	}
+
+	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+
+	return {
+		vertices: vertices,
+		colors: colors,
+		normals: normals,
+		indices: indices
+	};
+}
+
+function initSquareVertexBuffers(gl, offset, colour) {
 	// Create a unit square
 	//   v1------v0
 	//   /       /
@@ -234,8 +432,14 @@ function initSquareVertexBuffers(gl) {
 		0.5, 0.0, 0.5      // v3
 	]);
 
+	var r, g, b, alpha;
+	r = colour.r;
+	g = colour.g;
+	b = colour.b;
+	alpha = colour.alpha;
+
 	var colors = new Float32Array([
-		1, 1, 1,    1, 1, 0,    1, 0, 1,    0, 1, 1
+		1, 1, 1, 1,    1, 1, 0, 1,    1, 0, 1, 1,    0, 1, 1, 1
 	]);
 
 	var normals = new Float32Array([
@@ -243,12 +447,12 @@ function initSquareVertexBuffers(gl) {
 	]);
 
 	var indices = new Uint8Array([
-		0, 1, 2,    0, 2, 3
+		offset + 0, offset + 1, offset + 2,    offset + 0, offset + 2, offset + 3
 	]);
 
 	// Write the vertex property to buffers (coordinates, colors and normals)
 	if(!initArrayBuffer(gl, 'a_Position', vertices, 3, gl.FLOAT)) return -1;
-	if (!initArrayBuffer(gl, 'a_Color', colors, 3, gl.FLOAT)) return -1;
+	if (!initArrayBuffer(gl, 'a_Color', colors, 4, gl.FLOAT)) return -1;
 	if (!initArrayBuffer(gl, 'a_Normal', normals, 3, gl.FLOAT)) return -1;
 
 	var indexBuffer = gl.createBuffer();
@@ -260,7 +464,12 @@ function initSquareVertexBuffers(gl) {
 	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
 	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
 
-	return indices.length;
+	return {
+		vertices: vertices,
+		colors: colors,
+		normals: normals,
+		indices: indices
+	};
 }
 
 function initArrayBuffer (gl, attribute, data, num, type) {
@@ -288,54 +497,6 @@ function initArrayBuffer (gl, attribute, data, num, type) {
 	return true;
 }
 
-function initAxesVertexBuffers(gl) {
-
-	var verticesColors = new Float32Array([
-		// Vertex coordinates and color (for axes)
-		-20.0,  0.0,   0.0,  1.0,  1.0,  1.0,  // (x,y,z), (r,g,b) 
-		20.0,  0.0,   0.0,  1.0,  1.0,  1.0,
-		0.0,  20.0,   0.0,  1.0,  1.0,  1.0, 
-		0.0, -20.0,   0.0,  1.0,  1.0,  1.0,
-		0.0,   0.0, -20.0,  1.0,  1.0,  1.0, 
-		0.0,   0.0,  20.0,  1.0,  1.0,  1.0 
-	]);
-	var n = 6;
-
-	// Create a buffer object
-	var vertexColorBuffer = gl.createBuffer();  
-	if (!vertexColorBuffer) {
-		console.log('Failed to create the buffer object');
-		return false;
-	}
-
-	// Bind the buffer object to target
-	gl.bindBuffer(gl.ARRAY_BUFFER, vertexColorBuffer);
-	gl.bufferData(gl.ARRAY_BUFFER, verticesColors, gl.STATIC_DRAW);
-
-	var FSIZE = verticesColors.BYTES_PER_ELEMENT;
-	//Get the storage location of a_Position, assign and enable buffer
-	var a_Position = gl.getAttribLocation(gl.program, 'a_Position');
-	if (a_Position < 0) {
-		console.log('Failed to get the storage location of a_Position');
-		return -1;
-	}
-	gl.vertexAttribPointer(a_Position, 3, gl.FLOAT, false, FSIZE * 6, 0);
-	gl.enableVertexAttribArray(a_Position);  // Enable the assignment of the buffer object
-
-	// Get the storage location of a_Position, assign buffer and enable
-	var a_Color = gl.getAttribLocation(gl.program, 'a_Color');
-	if(a_Color < 0) {
-		console.log('Failed to get the storage location of a_Color');
-		return -1;
-	}
-	gl.vertexAttribPointer(a_Color, 3, gl.FLOAT, false, FSIZE * 6, FSIZE * 3);
-	gl.enableVertexAttribArray(a_Color);  // Enable the assignment of the buffer object
-
-	// Unbind the buffer object
-	gl.bindBuffer(gl.ARRAY_BUFFER, null);
-
-	return n;
-}
 
 var g_matrixStack = []; // Array for storing a matrix
 function pushMatrix(m) { // Store the specified matrix to the array
@@ -357,26 +518,9 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection)
 	// Clear color and depth buffer
 	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-	/*
-	gl.uniform1i(u_isLighting, false); // Will not apply lighting
-
-	// Set the vertex coordinates and color (for the x, y axes)
-
-	var nAxes = initAxesVertexBuffers(gl);
-	if (nAxes < 0) {
-		console.log('Failed to set the vertex information');
-		return;
-	}
-
-	// Calculate the view matrix and the projection matrix
-	modelMatrix.setTranslate(0, 0, 0);  // No Translation
-	// Pass the model matrix to the uniform variable
-	gl.uniformMatrix4fv(u_ModelMatrix, false, modelMatrix.elements);
-
-	// Draw x and y axes
-	gl.drawArrays(gl.LINES, 0, nAxes);
-
-	*/
+	// Enable face culling to 'look through walls'
+	gl.enable(gl.CULL_FACE);
+	gl.cullFace(gl.BACK);
 
 	// Set the light direction (in the world coordinate)
 	setLightDirection(gl, u_LightDirection);
@@ -385,7 +529,7 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection)
 	gl.uniform1i(u_isLighting, true); // Will apply lighting
 
 	// Set the vertex coordinates and color (for the square)
-	var nSquare = initSquareVertexBuffers(gl);
+	var nSquare = initSquareVertexBuffers(gl, 0, {r: 1, g: 0, b: 0.5, alpha: 1});
 	if (nSquare < 0) {
 		console.log('Failed to set the vertex information');
 		return;
@@ -408,7 +552,7 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection)
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(0, -h/2, 0);
 	modelMatrix.scale(w, 1.0, d);
-	drawshape(gl, u_ModelMatrix, u_NormalMatrix, nSquare);
+	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'wall');
 	modelMatrix = popMatrix();
 
 	// Make back wall
@@ -416,7 +560,7 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection)
 	modelMatrix.rotate(90, 1, 0, 0);
 	modelMatrix.translate(0, -d/2, 0);
 	modelMatrix.scale(w, 1, h);
-	drawshape(gl, u_ModelMatrix, u_NormalMatrix, nSquare);
+	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'wall');
 	modelMatrix = popMatrix();
 
 	// Make front wall
@@ -424,7 +568,7 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection)
 	modelMatrix.rotate(-90, 1, 0, 0);
 	modelMatrix.translate(0, -d/2, 0);
 	modelMatrix.scale(w, 1, h);
-	drawshape(gl, u_ModelMatrix, u_NormalMatrix, nSquare);
+	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'wall');
 	modelMatrix = popMatrix();
 
 	// Make left wall
@@ -432,7 +576,7 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection)
 	modelMatrix.rotate(-90, 0, 0, 1);
 	modelMatrix.translate(0, -w/2, 0);
 	modelMatrix.scale(h, 1, d);
-	drawshape(gl, u_ModelMatrix, u_NormalMatrix, nSquare);
+	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'wall');
 	modelMatrix = popMatrix();
 
 	// Make right wall
@@ -440,12 +584,13 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection)
 	modelMatrix.rotate(90, 0, 0, 1);
 	modelMatrix.translate(0, -w/2, 0);
 	modelMatrix.scale(h, 1, d);
-	drawshape(gl, u_ModelMatrix, u_NormalMatrix, nSquare);
+	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'wall');
 	modelMatrix = popMatrix();
 
 	/*
 	###################################    Draw the chair and sofa of the room    ###################################
 	*/
+
 
 	var dimensions = {
 		x: 0.3,
@@ -453,35 +598,90 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection)
 		z: 0.3
 	};
 	// Set the vertex coordinates and color (for the cube)
-	var colour = {r: 1, g: 0, b: 0};
+	var colour = {r: 1, g: 0, b: 0, alpha: 1};
+	
+	var nCube = initCubeVertexBuffers(gl, 0, colour);
+	if (nCube.indices.length < 0) {
+		console.log('Failed to set the vertex information');
+		return;
+	}
+	
 	// Rotate, and then translate
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(-0.8 * w/2, -h/2, 0.1 * d/2);
 	modelMatrix.rotate(100, 0, 1, 0);
-	drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions, colour);
+	drawSeat(gl, u_ModelMatrix, u_NormalMatrix, nCube.indices.length, dimensions, colour);
 	modelMatrix = popMatrix();
 
 	
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(-0.8 * w/2, -h/2, -0.6 * d/2);
 	modelMatrix.rotate(80, 0, 1, 0);
-	drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions, colour);
+	drawSeat(gl, u_ModelMatrix, u_NormalMatrix, nCube.indices.length, dimensions, colour);
 	modelMatrix = popMatrix();
 	
 	// Now draw the sofa
 	dimensions.x = 1;
-	colour.g = 1;
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(0.1 * w/2, -h/2, 0.7 * d/2);
 	modelMatrix.rotate(180, 0, 1, 0);
-	drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions, colour);
+	drawSeat(gl, u_ModelMatrix, u_NormalMatrix, nCube.indices.length, dimensions, colour);
 	modelMatrix = popMatrix();
-	
 
+	// Fish tank - water
+	colour = {
+		r: 0.0,
+		g: 0.5,
+		b: 1.0,
+		alpha: 0.5
+	};
+
+	nCube = initCubeVertexBuffers(gl, 0, colour);
+	if (nCube.indices.length < 0) {
+		console.log('Failed to set the vertex information');
+		return;
+	}
+
+	var gt = 0.01;
+	pushMatrix(modelMatrix);
+	modelMatrix.translate(0, -0.25, 0);
+	modelMatrix.scale(1-gt, 0.5-gt, 1-gt);
+	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'water');
+	modelMatrix = popMatrix();
+
+	// Fish tank - glass
+	colour = {
+		r: 0.2,
+		g: 0.2,
+		b: 0.2,
+		alpha: 0.1
+	};
+
+	nCube = initCubeVertexBuffers(gl, 0, colour);
+	if (nCube.indices.length < 0) {
+		console.log('Failed to set the vertex information');
+		return;
+	}
+
+	pushMatrix(modelMatrix);
+	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'glass');
+	modelMatrix = popMatrix();
+
+
+
+	/*
+	var nTank = initFishtankVertexBuffers(gl, 0, colour);
+	if (nTank.indices.length < 0) {
+		console.log('Failed to set the vertex information');
+		return;
+	}
+	
+	drawshape(gl, u_ModelMatrix, u_NormalMatrix, nTank.indices.length);
+*/
 }
 
 
-function drawshape(gl, u_ModelMatrix, u_NormalMatrix, n) {
+function drawshape(gl, u_ModelMatrix, u_NormalMatrix, name) {
 	pushMatrix(modelMatrix);
 
 	// Pass the model matrix to the uniform variable
@@ -492,8 +692,10 @@ function drawshape(gl, u_ModelMatrix, u_NormalMatrix, n) {
 	g_normalMatrix.transpose();
 	gl.uniformMatrix4fv(u_NormalMatrix, false, g_normalMatrix.elements);
 
-	// Draw the shape+
-	gl.drawElements(gl.TRIANGLES, n, gl.UNSIGNED_BYTE, 0);
+	// Draw the shape
+	var n = shapes[name].n;
+	var offset = shapes[name].offset;
+	gl.drawElements(gl.TRIANGLES, n, gl.UNSIGNED_BYTE, offset);
 
 	modelMatrix = popMatrix();
 }
@@ -565,13 +767,8 @@ function initSeatMatrices() {
 	// console.log(seatMatrices);
 }
 
-function drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions, colour) {
-	// Set the vertex coordinates and color (for the cube)
-	var nCube = initCubeVertexBuffers(gl, 0, colour);
-	if (nCube.indices.length < 0) {
-		console.log('Failed to set the vertex information');
-		return;
-	}
+function drawSeat(gl, u_ModelMatrix, u_NormalMatrix, n, dimensions, colour) {
+	
 
 	modelMatrix.scale(dimensions.x, dimensions.y, dimensions.z);
 
@@ -579,7 +776,7 @@ function drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions, colour) {
 		pushMatrix(modelMatrix);
 		modelMatrix.concat(componentMatrix);
 		// console.log(modelMatrix);
-		drawshape(gl, u_ModelMatrix, u_NormalMatrix, nCube.indices.length);
+		drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'furniture');
 		modelMatrix = popMatrix();
 	}
 }
