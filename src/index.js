@@ -30,17 +30,19 @@ var VSHADER_SOURCE =
 
 // Fragment shader program
 var FSHADER_SOURCE =
-//   '#ifdef GL_ES\n' +(should always be true according to documentation)
   'precision mediump float;\n' +
-//   '#endif\n' +
   'varying vec4 v_Color;\n' +
   'void main() {\n' +
   '  gl_FragColor = v_Color;\n' +
   '}\n';
 
+// eslint-disable-next-line no-undef
 var modelMatrix = new Matrix4(); // The model matrix
+// eslint-disable-next-line no-undef
 var viewMatrix = new Matrix4();  // The view matrix
+// eslint-disable-next-line no-undef
 var projMatrix = new Matrix4();  // The projection matrix
+// eslint-disable-next-line no-undef
 var g_normalMatrix = new Matrix4();  // Coordinate transformation matrix for normals
 
 var ANGLE_STEP = 3.0;  // The increments of rotation angle (degrees)
@@ -63,11 +65,13 @@ var shapes = {
 	'glass': {color: {r: 0.2, g: 1.0, b: 0.2, alpha: 0.1}, type: 'cube'}
 };
 
+// eslint-disable-next-line no-unused-vars
 function main() {
 	// Retrieve <canvas> element
 	var canvas = document.getElementById('webgl');
 
 	// Get the rendering context for WebGL
+	// eslint-disable-next-line no-undef
 	var gl = getWebGLContext(canvas);
 	if (!gl) {
 		console.log('Failed to get the rendering context for WebGL');
@@ -75,6 +79,7 @@ function main() {
 	}
 
 	// Initialize shaders
+	// eslint-disable-next-line no-undef
 	if (!initShaders(gl, VSHADER_SOURCE, FSHADER_SOURCE)) {
 		console.log('Failed to intialize shaders.');
 		return;
@@ -139,7 +144,6 @@ function main() {
 
 	var valueoffset = 0;
 	var indexoffset = 0;
-	console.log('hey');
 	for(var [key, value] of Object.entries(shapes)){
 		switch(value.type) {
 		case 'square':
@@ -152,7 +156,6 @@ function main() {
 			console.log(shapes[i].type);
 			return;
 		}
-		console.log(shape);
 		vertices = vertices.concat(shape.vertices);
 		colors = colors.concat(shape.colors);
 		normals = normals.concat(shape.normals);
@@ -168,9 +171,6 @@ function main() {
 	for (var i = 0; i < vertices.length/3; i++){
 		vdebug.push([vertices[3*i], vertices[3*i+1], vertices[3*i+2], colors[4*i], colors[4*i+1], colors[4*i+2]]);
 	}
-	console.log(vdebug);
-	console.log(indices);
-	console.log(shapes);
 
 	
 
@@ -347,6 +347,7 @@ function initArrayBuffer (gl, attribute, data, num, type) {
 
 var g_matrixStack = []; // Array for storing a matrix
 function pushMatrix(m) { // Store the specified matrix to the array
+	// eslint-disable-next-line no-undef
 	var m2 = new Matrix4(m);
 	g_matrixStack.push(m2);
 }
@@ -374,15 +375,6 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection)
 	
 
 	gl.uniform1i(u_isLighting, true); // Will apply lighting
-
-	// Set the vertex coordinates and color (for the square)
-	/*
-	var nSquare = initSquareVertexBuffers(gl, 0, {r: 1, g: 0, b: 0.5, alpha: 1});
-	if (nSquare < 0) {
-		console.log('Failed to set the vertex information');
-		return;
-	}
-	*/
 
 	// Room dimensions
 	let h = 5;
@@ -454,18 +446,21 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection)
 	drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions);
 	modelMatrix = popMatrix();
 
-	
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(-0.8 * w/2, -h/2, -0.6 * d/2);
 	modelMatrix.rotate(80, 0, 1, 0);
 	drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions);
 	modelMatrix = popMatrix();
 	
-	// Now draw the sofa
-	dimensions.x = 1;
 	pushMatrix(modelMatrix);
-	modelMatrix.translate(0.1 * w/2, -h/2, 0.7 * d/2);
-	modelMatrix.rotate(180, 0, 1, 0);
+	modelMatrix.translate(0.2 * w/2, -h/2, 0.7 * d/2);
+	modelMatrix.rotate(190, 0, 1, 0);
+	drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions);
+	modelMatrix = popMatrix();
+
+	pushMatrix(modelMatrix);
+	modelMatrix.translate(-0.3 * w/2, -h/2, 0.6 * d/2);
+	modelMatrix.rotate(165, 0, 1, 0);
 	drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions);
 	modelMatrix = popMatrix();
 
@@ -590,40 +585,44 @@ function drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions) {
 }
 
 function setLightDirection(gl, u_LightDirection) {
+	// eslint-disable-next-line no-undef
 	var lightDirection = new Vector3([2.0, 3.0, 4.0]);
+	// eslint-disable-next-line no-undef
 	var lightMatrix = new Matrix4();
 	lightMatrix.setRotate(g_xAngle, 1, 0, 0);
 	lightMatrix.rotate(g_yAngle, 0, 1, 0);
 
+	/*
 	var y_angle = Math.PI * g_yAngle / 180;
 	var x_angle = Math.PI * g_xAngle / 180;
 	var cy = Math.cos(y_angle);
 	var sy = Math.sin(y_angle);
 	var cx = Math.cos(x_angle);
 	var sx = Math.sin(x_angle);
-	var x = lightDirection.elements[0];
-	var y = lightDirection.elements[1];
-	var z = lightDirection.elements[2];
+	
 	var rotatedLightDir = new Vector3([
 		x*cy + z*sy,
 		x*sx*sy + y*cx - z*sx*cy,
 		-x*sy*cx + y*sy + z*cx*cy
 	]);
-
-	// console.log(rotatedLightDir);
-	// console.log(transform({x: x, y: y, z: z}, lightMatrix));
-
-	rotatedLightDir.normalize();     // Normalize
+	*/
+	var x = lightDirection.elements[0];
+	var y = lightDirection.elements[1];
+	var z = lightDirection.elements[2];
+	var rotatedLightDir = transformPoint(new Vector3([x, y, z]), new Matrix4(lightMatrix));
+	rotatedLightDir.normalize();
 	gl.uniform3fv(u_LightDirection, rotatedLightDir.elements);
 }
 
-function transform(point, m) {
-	var elements = new Float32Array([point.x, point.y, point.z, 1,    0, 0, 0, 0,    0, 0, 0, 0,    0, 0, 0, 0]);
+function transformPoint(point, m) {
+	var elements = new Float32Array([point.elements[0], point.elements[1], point.elements[2], 1,    0, 0, 0, 0,    0, 0, 0, 0,    0, 0, 0, 0]);
+	// eslint-disable-next-line no-undef
 	var pointMatrix = new Matrix4({elements: elements});
 	var transformation = m.concat(pointMatrix);
-	return {
-		x: transformation.elements[0],
-		y: transformation.elements[1],
-		z: transformation.elements[2],
-	};
+	// eslint-disable-next-line no-undef
+	return new Vector3([
+		transformation.elements[0],
+		transformation.elements[1],
+		transformation.elements[2],
+	]);
 }
