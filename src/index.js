@@ -48,6 +48,10 @@ var g_normalMatrix = new Matrix4();  // Coordinate transformation matrix for nor
 var ANGLE_STEP = 3.0;  // The increments of rotation angle (degrees)
 var g_xAngle = 0.0;    // The rotation x angle (degrees)
 var g_yAngle = 0.0;    // The rotation y angle (degrees)
+var g_zAngle = 0.0;    // The rotation z angle (degrees)
+
+var tankTilt = 0.0;
+const maxTilt = 45.0;
 
 var lastLoop = new Date();
 var thisLoop, fps;
@@ -211,6 +215,18 @@ function keydown(ev, gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDir
 		break;
 	case 37: // Left arrow key -> the negative rotation of arm1 around the y-axis
 		g_yAngle = (g_yAngle - ANGLE_STEP) % 360;
+		break;
+	case 69: // e key -> around z axis
+		g_zAngle = (g_zAngle - ANGLE_STEP) % 360;
+		break;
+	case 81: // q key -> around z axis
+		g_zAngle = (g_zAngle + ANGLE_STEP) % 360;
+		break;
+	case 68: // d key -> around z axis
+		tankTilt = Math.max((tankTilt - ANGLE_STEP), -maxTilt);
+		break;
+	case 65: // a key -> around z axis
+		tankTilt = Math.min(tankTilt + ANGLE_STEP, maxTilt);
 		break;
 	default: return; // Skip drawing at no effective action
 	}
@@ -389,6 +405,7 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection)
 	modelMatrix.setTranslate(0, 0, 0);
 	modelMatrix.rotate(g_xAngle, 1, 0, 0);
 	modelMatrix.rotate(g_yAngle, 0, 1, 0);
+	modelMatrix.rotate(g_zAngle, 0, 0, 1);
 
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(0, -h/2, 0);
@@ -464,20 +481,18 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection)
 	drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions);
 	modelMatrix = popMatrix();
 
-	// Fish tank - water
-
-	var gt = 0.1;
-	var depth = 0.8;
+	// Table
+	dimensions = {x: 2, y: 0.7, z: 1};
 	pushMatrix(modelMatrix);
-	modelMatrix.translate(0, -(1-depth-gt/2)/2, 0);
-	modelMatrix.scale(1-gt, depth-gt, 1-gt);
-	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'water');
+	modelMatrix.translate(0, -h/2, 0);
+	var tableHeight = drawTable(gl, u_ModelMatrix, u_NormalMatrix, dimensions);
 	modelMatrix = popMatrix();
 
-	// Fish tank - glass	
-
+	var tankHeight = 1;
+	dimensions.y = tankHeight;
 	pushMatrix(modelMatrix);
-	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'glass');
+	modelMatrix.translate(0, tableHeight - h/2, 0);
+	drawFishTank(gl, u_ModelMatrix, u_NormalMatrix, dimensions, tankTilt);
 	modelMatrix = popMatrix();
 }
 
@@ -584,6 +599,58 @@ function drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions) {
 	}
 }
 
+function drawTable(gl, u_ModelMatrix, u_NormalMatrix, dimensions) {
+
+	modelMatrix.scale(dimensions.x, dimensions.y, dimensions.z);
+
+	var baseHeight = 1;
+	pushMatrix(modelMatrix);
+	modelMatrix.translate(0, baseHeight/2, 0);
+	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'furniture');
+	modelMatrix = popMatrix();
+
+	var tableThickness = 0.5;
+	pushMatrix(modelMatrix);
+	modelMatrix.translate(0, baseHeight + tableThickness/2, 0);
+	modelMatrix.scale(2, tableThickness, 2);
+	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'furniture');
+	modelMatrix = popMatrix();
+
+	return dimensions.y * (baseHeight + tableThickness);
+}
+
+function drawFishTank(gl, u_ModelMatrix, u_NormalMatrix, dimensions, tilt) {
+	pushMatrix(modelMatrix);
+	// Apply tilt
+	if (tilt > 0){
+		modelMatrix.translate(-dimensions.x/2, 0, 0);
+		modelMatrix.rotate(tilt, 0, 0, 1);
+		modelMatrix.translate(dimensions.x/2, 0, 0);
+	}else if (tilt < 0) {
+		modelMatrix.translate(dimensions.x/2, 0, 0);
+		modelMatrix.rotate(tilt, 0, 0, 1);
+		modelMatrix.translate(-dimensions.x/2, 0, 0);
+	}
+	modelMatrix.scale(dimensions.x, dimensions.y, dimensions.z);
+
+	// Fish tank - water
+	var gt = 0.1;
+	var depth = 0.6;
+	pushMatrix(modelMatrix);
+	modelMatrix.translate(0, -(1-depth-gt/2)/2 + dimensions.y/2, 0);
+	modelMatrix.scale(1-gt, depth-gt, 1-gt);
+	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'water');
+	modelMatrix = popMatrix();
+
+	// Fish tank - glass	
+	pushMatrix(modelMatrix);
+	modelMatrix.translate(0, dimensions.y/2, 0);
+	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'glass');
+	modelMatrix = popMatrix();
+
+	modelMatrix = popMatrix();
+}
+
 function setLightDirection(gl, u_LightDirection) {
 	// eslint-disable-next-line no-undef
 	var lightDirection = new Vector3([2.0, 3.0, 4.0]);
@@ -625,4 +692,61 @@ function transformPoint(point, m) {
 		transformation.elements[1],
 		transformation.elements[2],
 	]);
+}
+
+//
+// Initialize a texture and load an image.
+// When the image finished loading copy it into the texture.
+//
+function loadTexture(gl, url) {
+	const texture = gl.createTexture();
+	gl.bindTexture(gl.TEXTURE_2D, texture);
+  
+	// Because images have to be download over the internet
+	// they might take a moment until they are ready.
+	// Until then put a single pixel in the texture so we can
+	// use it immediately. When the image has finished downloading
+	// we'll update the texture with the contents of the image.
+	const level = 0;
+	const internalFormat = gl.RGBA;
+	const width = 1;
+	const height = 1;
+	const border = 0;
+	const srcFormat = gl.RGBA;
+	const srcType = gl.UNSIGNED_BYTE;
+	const pixel = new Uint8Array([0, 0, 255, 255]);  // opaque blue
+	gl.texImage2D(
+		gl.TEXTURE_2D, level, internalFormat,
+		width, height, border, srcFormat, srcType,
+		pixel
+	);
+  
+	const image = new Image();
+	image.onload = function() {
+		gl.bindTexture(gl.TEXTURE_2D, texture);
+		gl.texImage2D(
+			gl.TEXTURE_2D, level, internalFormat,
+			srcFormat, srcType, image);
+  
+		// WebGL1 has different requirements for power of 2 images
+		// vs non power of 2 images so check if the image is a
+		// power of 2 in both dimensions.
+		if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
+			// Yes, it's a power of 2. Generate mips.
+			gl.generateMipmap(gl.TEXTURE_2D);
+		} else {
+			// No, it's not a power of 2. Turn off mips and set
+			// wrapping to clamp to edge
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+		}
+	};
+	image.src = url;
+  
+	return texture;
+}
+  
+function isPowerOf2(value) {
+	return (value & (value - 1)) == 0;
 }
