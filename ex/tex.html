@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Texture test</title>
+  </head>
+
+  <body onload="main()">
+    <canvas id="webgl" width="1400" height="800">
+    Please use a browser that supports "canvas"
+    </canvas>
+    <div id="overlay">
+      <div>FPS: <span id="fps"></span></div>
+      <img src='../img/wood.png'>
+    </div>
+
+    <script src="../lib/webgl-utils.js"></script>
+    <script src="../lib/webgl-debug.js"></script>
+    <script src="../lib/cuon-utils.js"></script>
+    <script src="../lib/cuon-matrix.js"></script>
+    <script src="./tex.js"></script>
+  </body>
+</html>

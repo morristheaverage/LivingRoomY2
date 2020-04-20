@@ -4,6 +4,7 @@ var VSHADER_SOURCE =
   'attribute vec4 a_Position;\n' +
   'attribute vec4 a_Color;\n' +
   'attribute vec4 a_Normal;\n' +        // Normal
+  'attribute vec2 a_TexCoords;\n' +
   'uniform mat4 u_ModelMatrix;\n' +
   'uniform mat4 u_NormalMatrix;\n' +
   'uniform mat4 u_ViewMatrix;\n' +
@@ -11,29 +12,33 @@ var VSHADER_SOURCE =
   'uniform vec3 u_LightColor;\n' +     // Light color
   'uniform vec3 u_LightDirection;\n' + // Light direction (in the world coordinate, normalized)
   'varying vec4 v_Color;\n' +
-  'uniform bool u_isLighting;\n' +
+  'varying vec2 v_TexCoords;\n' +
   'void main() {\n' +
   '  gl_Position = u_ProjMatrix * u_ViewMatrix * u_ModelMatrix * a_Position;\n' +
-  '  if(u_isLighting)\n' + 
-  '  {\n' +
-  '     vec3 normal = normalize((u_NormalMatrix * a_Normal).xyz);\n' +
-  '		float ambient = 0.4;\n' +
-  '     float nDotL = max(dot(normal, u_LightDirection), ambient);\n' +
+  '  vec3 normal = normalize((u_NormalMatrix * a_Normal).xyz);\n' +
+  '  float ambient = 0.4;\n' +
+  '  float nDotL = max(dot(normal, u_LightDirection), ambient);\n' +
   // Calculate the color due to diffuse reflection
-  '     vec3 diffuse = u_LightColor * a_Color.rgb * nDotL;\n' +
-  '     v_Color = vec4(diffuse, a_Color.a);\n' +  '  }\n' +
-  '  else\n' +
-  '  {\n' +
-  '     v_Color = a_Color;\n' +
-  '  }\n' + 
+  '  vec3 diffuse = u_LightColor * a_Color.rgb * nDotL;\n' +
+  '  v_Color = vec4(diffuse, a_Color.a);\n' +
+  '  v_TexCoords = a_TexCoords;\n' +
   '}\n';
 
 // Fragment shader program
 var FSHADER_SOURCE =
   'precision mediump float;\n' +
   'varying vec4 v_Color;\n' +
+  'uniform bool u_UseTextures;\n' +
+  'uniform sampler2D u_Sampler;\n' +
+  'varying vec2 v_TexCoords;\n' +
   'void main() {\n' +
-  '  gl_FragColor = v_Color;\n' +
+  '		if (u_UseTextures){\n' +
+  '			vec4 TexColor = texture2D(u_Sampler, v_TexCoords);\n' +
+  '			gl_FragColor = vec4(TexColor.rgb, 1.0);\n' +
+  '		}else{\n' +
+  '			gl_FragColor = v_Color;\n' +
+  '		}\n' +
+  '		if (gl_FragColor.a < 0.5) discard;\n' +
   '}\n';
 
 // eslint-disable-next-line no-undef
@@ -53,6 +58,9 @@ var g_zAngle = 0.0;    // The rotation z angle (degrees)
 var tankTilt = 0.0;
 const maxTilt = 45.0;
 
+var anim = 0.0;
+var animStep = 0.05;
+
 var lastLoop = new Date();
 var thisLoop, fps;
 var fpsElement = document.getElementById('fps');
@@ -63,11 +71,20 @@ var seatMatrices = [];
 
 // A global object to contain buffer info
 var shapes = {
-	'wall': {color: {r: 1.0, g: 1.0, b: 1.0, alpha: 1.0}, type: 'square'},
+	'wall': {color: {r: 1.0, g: 1.0, b: 1.0, alpha: 1.0}, type: 'square', tes: true},
+	'fish': {color: {r: 0.0, g: 0.0, b: 0.0, alpha: 0.0}, type: 'square', tes: false},
 	'furniture': {color: {r: 1.0, g: 0.0, b: 0.0, alpha: 1.0}, type: 'cube'},
-	'water': {color: {r: 0.0, g: 0.5, b: 1.0, alpha: 0.5}, type: 'cube'},
 	'glass': {color: {r: 0.2, g: 1.0, b: 0.2, alpha: 0.1}, type: 'cube'}
 };
+
+var floorLoaded = false;
+var wallLoaded = false;
+var fishLoaded = false;
+
+// Room dimensions
+let h = 5;
+let d = 10;
+let w = 12;
 
 // eslint-disable-next-line no-unused-vars
 function main() {
@@ -108,19 +125,21 @@ function main() {
 	var u_LightColor = gl.getUniformLocation(gl.program, 'u_LightColor');
 	var u_LightDirection = gl.getUniformLocation(gl.program, 'u_LightDirection');
 
-	// Trigger using lighting or not
-	var u_isLighting = gl.getUniformLocation(gl.program, 'u_isLighting'); 
 
 	if (!u_ModelMatrix || !u_ViewMatrix || !u_NormalMatrix ||
-      !u_ProjMatrix || !u_LightColor || !u_LightDirection ||
-      !u_isLighting ) { 
+      !u_ProjMatrix || !u_LightColor || !u_LightDirection ) { 
+		console.log(!u_ModelMatrix);
+		console.log(!u_ViewMatrix);
+		console.log(!u_NormalMatrix);
+		console.log(!u_ProjMatrix);
+		console.log(!u_LightColor);
+		console.log(!u_LightDirection);
 		console.log('Failed to Get the storage locations of u_ModelMatrix, u_ViewMatrix, and/or u_ProjMatrix');
 		return;
 	}
 
 	// Set the light color (white)
 	gl.uniform3f(u_LightColor, 1.0, 1.0, 1.0);
-	gl.uniform1i(u_isLighting, true); // Will apply lighting
 	
 
 	// Calculate the view matrix and the projection matrix
@@ -138,12 +157,20 @@ function main() {
 	// 2-red cubes for furniture
 	// 3-blue water cube
 	// 4-clear glass cube
+	for (var i = -maxTilt; i <= maxTilt; i += ANGLE_STEP){
+		shapes['water' + String(i)] = {
+			color: {r: 0.0, g: 0.5, b: 1.0, alpha: 0.5},
+			type: 'tiltedcube',
+			tilt: i
+		};
+	}
 
 	var shape;
 
 	var vertices = [];
 	var colors = [];
 	var normals = [];
+	var texCoords = [];
 	var indices = [];
 
 	var valueoffset = 0;
@@ -151,10 +178,13 @@ function main() {
 	for(var [key, value] of Object.entries(shapes)){
 		switch(value.type) {
 		case 'square':
-			shape = initSquareVertexBuffers(gl, valueoffset, value.color);
+			shape = initSquareVertexBuffers(valueoffset, value.color, value.tes);
 			break;
 		case 'cube':
-			shape = initCubeVertexBuffers(gl, valueoffset, value.color);
+			shape = initCubeVertexBuffers(valueoffset, value.color, 0);
+			break;
+		case 'tiltedcube':
+			shape = initCubeVertexBuffers(valueoffset, value.color, value.tilt);
 			break;
 		default:
 			console.log(shapes[i].type);
@@ -163,6 +193,7 @@ function main() {
 		vertices = vertices.concat(shape.vertices);
 		colors = colors.concat(shape.colors);
 		normals = normals.concat(shape.normals);
+		texCoords = texCoords.concat(shape.texCoords);
 
 		shapes[key]['offset'] = indexoffset;
 		shapes[key]['n'] = shape.indices.length;
@@ -173,15 +204,14 @@ function main() {
 
 	var vdebug = [];
 	for (var i = 0; i < vertices.length/3; i++){
-		vdebug.push([vertices[3*i], vertices[3*i+1], vertices[3*i+2], colors[4*i], colors[4*i+1], colors[4*i+2]]);
+		vdebug.push([vertices[3*i], vertices[3*i+1], vertices[3*i+2], colors[4*i], colors[4*i+1], colors[4*i+2], texCoords[2*i], texCoords[2*i+1]]);
 	}
-
 	
-
 	// Write the vertex property to buffers (coordinates, colors and normals)
 	if (!initArrayBuffer(gl, 'a_Position', new Float32Array(vertices), 3, gl.FLOAT)) return -1;
 	if (!initArrayBuffer(gl, 'a_Color', new Float32Array(colors), 4, gl.FLOAT)) return -1;
 	if (!initArrayBuffer(gl, 'a_Normal', new Float32Array(normals), 3, gl.FLOAT)) return -1;
+	if (!initArrayBuffer(gl, 'a_TexCoords', new Float32Array(texCoords), 2, gl.FLOAT)) return -1;
 
 	// Write the indices to the buffer object
 	var indexBuffer = gl.createBuffer();
@@ -194,15 +224,53 @@ function main() {
 	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
 
 
+	// Set up texture stuff
+	var u_UseTextures = gl.getUniformLocation(gl.program, 'u_UseTextures');
+	var u_Sampler = gl.getUniformLocation(gl.program, 'u_Sampler');
 
+	// Load textures
+	const floorPic = new Image();
+	var floorTex = gl.createTexture();
+	floorPic.onload = () => {
+		// document.body.appendChild(floorPic);
+		loadTexture(gl, floorTex, u_Sampler, floorPic, 0);
+		floorLoaded = true;
+		draw(gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures, u_Sampler);
+		console.log('load', floorLoaded);
+	};
+	console.log('loaded', floorLoaded);
+	floorPic.crossOrigin = 'Anonymous';
+	floorPic.src = '../img/wood.png';
+
+	const wallPic = new Image();
+	let wallTex = gl.createTexture();
+	wallPic.onload = () => {
+		loadTexture(gl, wallTex, u_Sampler, wallPic, 1);
+		wallLoaded = true;
+		draw(gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures, u_Sampler);
+	};
+	wallPic.src = '../img/blue.jpg';
+
+	// Wall courtesy of https://favpng.com/
+
+	const fishPic = new Image();
+	let fishTex = gl.createTexture();
+	fishPic.onload = () => {
+		loadTexture(gl, fishTex, u_Sampler, fishPic, 2);
+		fishLoaded = true;
+		draw(gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures, u_Sampler);
+	};
+	fishPic.src = '../img/fish.png';
+
+	
 	document.onkeydown = function(ev){
-		keydown(ev, gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection);
+		keydown(ev, gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures, u_Sampler);
 	};
 
-	draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection);
+	draw(gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures, u_Sampler);
 }
 
-function keydown(ev, gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection) {
+function keydown(ev, gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures, u_Sampler) {
 	switch (ev.keyCode) {
 	case 40: // Up arrow key -> the positive rotation of arm1 around the y-axis
 		g_xAngle = (g_xAngle + ANGLE_STEP) % 360;
@@ -228,15 +296,18 @@ function keydown(ev, gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDir
 	case 65: // a key -> around z axis
 		tankTilt = Math.min(tankTilt + ANGLE_STEP, maxTilt);
 		break;
+	case 32: // space key -> increment animation counter
+		anim = (anim + animStep) % 1;
+		break;
 	default: return; // Skip drawing at no effective action
 	}
 
 	// Draw the scene
-	draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection);
+	draw(gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures, u_Sampler);
 }
 
 
-function initCubeVertexBuffers(gl, offset, colour) {
+function initCubeVertexBuffers(offset, colour, topTilt) {
 	// Create a cube
 	//    v6----- v5
 	//   /|      /|
@@ -245,13 +316,22 @@ function initCubeVertexBuffers(gl, offset, colour) {
 	//  | |v7---|-|v4
 	//  |/      |/
 	//  v2------v3
+
+	// The top is tilted by z degrees around the z axis
+	// left side is 0.5t higher
+	// right side is 0.5t lower
+	var rad = Math.PI * topTilt / 180;
+	var t = Math.tan(rad);
+	var s = Math.sin(rad);
+	var c = Math.cos(rad);
+
 	var vertices = [   // Coordinates
-		0.5, 0.5, 0.5,  -0.5, 0.5, 0.5,  -0.5,-0.5, 0.5,   0.5,-0.5, 0.5, // v0-v1-v2-v3 front
-		0.5, 0.5, 0.5,   0.5,-0.5, 0.5,   0.5,-0.5,-0.5,   0.5, 0.5,-0.5, // v0-v3-v4-v5 right
-		0.5, 0.5, 0.5,   0.5, 0.5,-0.5,  -0.5, 0.5,-0.5,  -0.5, 0.5, 0.5, // v0-v5-v6-v1 up
-		-0.5, 0.5, 0.5,  -0.5, 0.5,-0.5,  -0.5,-0.5,-0.5,  -0.5,-0.5, 0.5, // v1-v6-v7-v2 left
+		0.5, 0.5 - 0.5*t, 0.5,  -0.5, 0.5 + 0.5*t, 0.5,  -0.5,-0.5, 0.5,   0.5,-0.5, 0.5, // v0-v1-v2-v3 front
+		0.5, 0.5 - 0.5*t, 0.5,   0.5,-0.5, 0.5,   0.5,-0.5,-0.5,   0.5, 0.5 - 0.5*t,-0.5, // v0-v3-v4-v5 right
+		0.5, 0.5 - 0.5*t, 0.5,   0.5, 0.5 - 0.5*t,-0.5,  -0.5, 0.5 + 0.5*t,-0.5,  -0.5, 0.5 + 0.5*t, 0.5, // v0-v5-v6-v1 up
+		-0.5, 0.5 + 0.5*t, 0.5,  -0.5, 0.5 + 0.5*t,-0.5,  -0.5,-0.5,-0.5,  -0.5,-0.5, 0.5, // v1-v6-v7-v2 left
 		-0.5,-0.5,-0.5,   0.5,-0.5,-0.5,   0.5,-0.5, 0.5,  -0.5,-0.5, 0.5, // v7-v4-v3-v2 down
-		0.5,-0.5,-0.5,  -0.5,-0.5,-0.5,  -0.5, 0.5,-0.5,   0.5, 0.5,-0.5  // v4-v7-v6-v5 back
+		0.5,-0.5,-0.5,  -0.5,-0.5,-0.5,  -0.5, 0.5 + 0.5*t,-0.5,   0.5, 0.5 - 0.5*t,-0.5  // v4-v7-v6-v5 back
 	];
 
 	var r, g, b;
@@ -272,10 +352,19 @@ function initCubeVertexBuffers(gl, offset, colour) {
 	var normals = [    // Normal
 		0.0, 0.0, 1.0,   0.0, 0.0, 1.0,   0.0, 0.0, 1.0,   0.0, 0.0, 1.0,  // v0-v1-v2-v3 front
 		1.0, 0.0, 0.0,   1.0, 0.0, 0.0,   1.0, 0.0, 0.0,   1.0, 0.0, 0.0,  // v0-v3-v4-v5 right
-		0.0, 1.0, 0.0,   0.0, 1.0, 0.0,   0.0, 1.0, 0.0,   0.0, 1.0, 0.0,  // v0-v5-v6-v1 up
+		s,     c, 0.0,   s,     c, 0.0,   s,     c, 0.0,   s,     c, 0.0,  // v0-v5-v6-v1 up
 		-1.0, 0.0, 0.0,  -1.0, 0.0, 0.0,  -1.0, 0.0, 0.0,  -1.0, 0.0, 0.0,  // v1-v6-v7-v2 left
 		0.0,-1.0, 0.0,   0.0,-1.0, 0.0,   0.0,-1.0, 0.0,   0.0,-1.0, 0.0,  // v7-v4-v3-v2 down
 		0.0, 0.0,-1.0,   0.0, 0.0,-1.0,   0.0, 0.0,-1.0,   0.0, 0.0,-1.0   // v4-v7-v6-v5 back
+	];
+
+	var texCoords = [
+		1.0, 1.0,    0.0, 1.0,    1.0, 1.0,    1.0, 0.0,
+		1.0, 1.0,    0.0, 1.0,    1.0, 1.0,    1.0, 0.0,
+		1.0, 1.0,    0.0, 1.0,    1.0, 1.0,    1.0, 0.0,
+		1.0, 1.0,    0.0, 1.0,    1.0, 1.0,    1.0, 0.0,
+		1.0, 1.0,    0.0, 1.0,    1.0, 1.0,    1.0, 0.0,
+		1.0, 1.0,    0.0, 1.0,    1.0, 1.0,    1.0, 0.0
 	];
 
 
@@ -293,11 +382,12 @@ function initCubeVertexBuffers(gl, offset, colour) {
 		vertices: vertices,
 		colors: colors,
 		normals: normals,
+		texCoords: texCoords,
 		indices: indices
 	};
 }
 
-function initSquareVertexBuffers(gl, offset, colour) {
+function initSquareVertexBuffers(offset, colour, tes) {
 	// Create a unit square
 	//   v1------v0
 	//   /       /
@@ -323,6 +413,17 @@ function initSquareVertexBuffers(gl, offset, colour) {
 		0.0, 1.0, 0.0,    0.0, 1.0, 0.0,    0.0, 1.0, 0.0,    0.0, 1.0, 0.0
 	];
 
+	let texCoords;
+	if (tes){
+		texCoords = [
+			10.0,0.0,    0.0, 0.0,    0.0,10.0,   10.0,10.0 // v0-v1-v2-v3
+		];
+	} else{
+		texCoords = [
+			1.0, 0.0,    0.0, 0.0,    0.0, 1.0,    1.0, 1.0 // v0-v1-v2-v3
+		];
+	}
+
 	var indices = [
 		offset + 0, offset + 1, offset + 2,    offset + 0, offset + 2, offset + 3
 	];
@@ -331,6 +432,7 @@ function initSquareVertexBuffers(gl, offset, colour) {
 		vertices: vertices,
 		colors: colors,
 		normals: normals,
+		texCoords: texCoords,
 		indices: indices
 	};
 }
@@ -372,7 +474,8 @@ function popMatrix() { // Retrieve the matrix from the array
 	return g_matrixStack.pop();
 }
 
-function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection) {
+function draw(gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures, u_Sampler) {
+	// gl.uniform1i(u_Sampler, 0); // if we did we would use gl.TEXTURE0
 	
 	thisLoop = new Date();
 	fps = 1000 / (thisLoop - lastLoop);
@@ -388,14 +491,6 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection)
 
 	// Set the light direction (in the world coordinate)
 	setLightDirection(gl, u_LightDirection);
-	
-
-	gl.uniform1i(u_isLighting, true); // Will apply lighting
-
-	// Room dimensions
-	let h = 5;
-	let d = 10;
-	let w = 12;
 
 	/*
 	###################################    Draw the walls and floor of the room    ###################################
@@ -410,8 +505,24 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection)
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(0, -h/2, 0);
 	modelMatrix.scale(w, 1.0, d);
+	// Wooden floor-----------------------------------------------------------
+	gl.uniform1i(u_Sampler, 0);
+	if(floorLoaded) {
+		gl.uniform1i(u_UseTextures, true);
+	} else {
+		gl.uniform1i(u_UseTextures, false);
+	}
 	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'wall');
+	// -----------------------------------------------------------------------
 	modelMatrix = popMatrix();
+
+	// The rest doesn't use a texture
+	if(wallLoaded) {
+		gl.uniform1i(u_UseTextures, true);
+	}else{
+		gl.uniform1i(u_UseTextures, false);
+	}
+	gl.uniform1i(u_Sampler, 1);
 
 	// Make back wall
 	pushMatrix(modelMatrix);
@@ -449,6 +560,7 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection)
 	###################################    Draw the chair and sofa of the room    ###################################
 	*/
 
+	gl.uniform1i(u_UseTextures, false);
 
 	var dimensions = {
 		x: 0.3,
@@ -457,32 +569,29 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection)
 	};
 	
 	// Rotate, and then translate
-	pushMatrix(modelMatrix);
-	modelMatrix.translate(-0.8 * w/2, -h/2, 0.1 * d/2);
-	modelMatrix.rotate(100, 0, 1, 0);
-	drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions);
-	modelMatrix = popMatrix();
+	var heightParabola = 6 * (anim * (1 - anim)) - 1;
 
-	pushMatrix(modelMatrix);
-	modelMatrix.translate(-0.8 * w/2, -h/2, -0.6 * d/2);
-	modelMatrix.rotate(80, 0, 1, 0);
-	drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions);
-	modelMatrix = popMatrix();
-	
-	pushMatrix(modelMatrix);
-	modelMatrix.translate(0.2 * w/2, -h/2, 0.7 * d/2);
-	modelMatrix.rotate(190, 0, 1, 0);
-	drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions);
-	modelMatrix = popMatrix();
+	var positions = [
+		[-0.8, -1, -0.6, 80],
+		[-0.8, -1, 0.1, 100],
+		[-0.3, -1, 0.6, 165],
+		[0.2, -1, 0.7, 190]
+	];
 
-	pushMatrix(modelMatrix);
-	modelMatrix.translate(-0.3 * w/2, -h/2, 0.6 * d/2);
-	modelMatrix.rotate(165, 0, 1, 0);
-	drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions);
-	modelMatrix = popMatrix();
+	for (var i in positions){
+		var j = (parseInt(i) + 1) % positions.length;
+		var [posx, posy, posz, rot] = positions[i];
+		var [newposx, newposy, newposz, newrot] = positions[j];
+		var newY = j == 0 ? heightParabola : ((1-anim)*posy + anim*newposy);
+		pushMatrix(modelMatrix);
+		modelMatrix.translate(((1-anim)*posx + anim*newposx) * w/2, newY * h/2, ((1-anim)*posz + anim*newposz) * d/2);
+		modelMatrix.rotate((1-anim)*rot + anim*newrot, 0, 1, 0);
+		drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions);
+		modelMatrix = popMatrix();
+	}
 
 	// Table
-	dimensions = {x: 2, y: 0.7, z: 1};
+	dimensions = {x: 2, y: 1, z: 1};
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(0, -h/2, 0);
 	var tableHeight = drawTable(gl, u_ModelMatrix, u_NormalMatrix, dimensions);
@@ -492,7 +601,7 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_isLighting, u_LightDirection)
 	dimensions.y = tankHeight;
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(0, tableHeight - h/2, 0);
-	drawFishTank(gl, u_ModelMatrix, u_NormalMatrix, dimensions, tankTilt);
+	drawFishTank(gl, u_ModelMatrix, u_NormalMatrix, dimensions, tankTilt, u_Sampler, u_UseTextures);
 	modelMatrix = popMatrix();
 }
 
@@ -606,21 +715,23 @@ function drawTable(gl, u_ModelMatrix, u_NormalMatrix, dimensions) {
 	var baseHeight = 1;
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(0, baseHeight/2, 0);
-	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'furniture');
+	// drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'furniture');
 	modelMatrix = popMatrix();
 
 	var tableThickness = 0.5;
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(0, baseHeight + tableThickness/2, 0);
 	modelMatrix.scale(2, tableThickness, 2);
-	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'furniture');
+	// drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'furniture');
 	modelMatrix = popMatrix();
 
 	return dimensions.y * (baseHeight + tableThickness);
 }
 
-function drawFishTank(gl, u_ModelMatrix, u_NormalMatrix, dimensions, tilt) {
+function drawFishTank(gl, u_ModelMatrix, u_NormalMatrix, dimensions, tilt, u_Sampler, u_UseTextures) {
 	pushMatrix(modelMatrix);
+	var gt = 0.1;
+	var depth = 0.6;
 	// Apply tilt
 	if (tilt > 0){
 		modelMatrix.translate(-dimensions.x/2, 0, 0);
@@ -631,24 +742,39 @@ function drawFishTank(gl, u_ModelMatrix, u_NormalMatrix, dimensions, tilt) {
 		modelMatrix.rotate(tilt, 0, 0, 1);
 		modelMatrix.translate(-dimensions.x/2, 0, 0);
 	}
+
+	var choice = 'water' + String(tilt);
+	// console.log(choice);
 	modelMatrix.scale(dimensions.x, dimensions.y, dimensions.z);
 
 	// Fish tank - water
-	var gt = 0.1;
-	var depth = 0.6;
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(0, -(1-depth-gt/2)/2 + dimensions.y/2, 0);
 	modelMatrix.scale(1-gt, depth-gt, 1-gt);
-	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'water');
+	// drawshape(gl, u_ModelMatrix, u_NormalMatrix, choice);
 	modelMatrix = popMatrix();
 
 	// Fish tank - glass	
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(0, dimensions.y/2, 0);
-	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'glass');
+	modelMatrix.scale(1, 1, 1);
+	// drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'glass');
 	modelMatrix = popMatrix();
 
 	modelMatrix = popMatrix();
+
+	// Tim the fish
+	if (fishLoaded) {
+		gl.uniform1i(u_Sampler, 2);
+		gl.uniform1i(u_UseTextures, true);
+		gl.disable(gl.CULL_FACE);
+		// Position Tim
+		pushMatrix(modelMatrix);
+		modelMatrix.translate(0, -(1-depth-gt/2)/2 + dimensions.y/2, 0);
+		modelMatrix.rotate(-90, 1, 0, 0);
+		drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'fish');
+		modelMatrix = popMatrix();
+	}
 }
 
 function setLightDirection(gl, u_LightDirection) {
@@ -659,20 +785,6 @@ function setLightDirection(gl, u_LightDirection) {
 	lightMatrix.setRotate(g_xAngle, 1, 0, 0);
 	lightMatrix.rotate(g_yAngle, 0, 1, 0);
 
-	/*
-	var y_angle = Math.PI * g_yAngle / 180;
-	var x_angle = Math.PI * g_xAngle / 180;
-	var cy = Math.cos(y_angle);
-	var sy = Math.sin(y_angle);
-	var cx = Math.cos(x_angle);
-	var sx = Math.sin(x_angle);
-	
-	var rotatedLightDir = new Vector3([
-		x*cy + z*sy,
-		x*sx*sy + y*cx - z*sx*cy,
-		-x*sy*cx + y*sy + z*cx*cy
-	]);
-	*/
 	var x = lightDirection.elements[0];
 	var y = lightDirection.elements[1];
 	var z = lightDirection.elements[2];
@@ -698,55 +810,25 @@ function transformPoint(point, m) {
 // Initialize a texture and load an image.
 // When the image finished loading copy it into the texture.
 //
-function loadTexture(gl, url) {
-	const texture = gl.createTexture();
-	gl.bindTexture(gl.TEXTURE_2D, texture);
-  
-	// Because images have to be download over the internet
-	// they might take a moment until they are ready.
-	// Until then put a single pixel in the texture so we can
-	// use it immediately. When the image has finished downloading
-	// we'll update the texture with the contents of the image.
-	const level = 0;
-	const internalFormat = gl.RGBA;
-	const width = 1;
-	const height = 1;
-	const border = 0;
-	const srcFormat = gl.RGBA;
-	const srcType = gl.UNSIGNED_BYTE;
-	const pixel = new Uint8Array([0, 0, 255, 255]);  // opaque blue
-	gl.texImage2D(
-		gl.TEXTURE_2D, level, internalFormat,
-		width, height, border, srcFormat, srcType,
-		pixel
-	);
-  
-	const image = new Image();
-	image.onload = function() {
-		gl.bindTexture(gl.TEXTURE_2D, texture);
-		gl.texImage2D(
-			gl.TEXTURE_2D, level, internalFormat,
-			srcFormat, srcType, image);
-  
-		// WebGL1 has different requirements for power of 2 images
-		// vs non power of 2 images so check if the image is a
-		// power of 2 in both dimensions.
-		if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
-			// Yes, it's a power of 2. Generate mips.
-			gl.generateMipmap(gl.TEXTURE_2D);
-		} else {
-			// No, it's not a power of 2. Turn off mips and set
-			// wrapping to clamp to edge
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-		}
-	};
-	image.src = url;
-  
-	return texture;
-}
-  
-function isPowerOf2(value) {
-	return (value & (value - 1)) == 0;
+function loadTexture(gl, texture, u_Sampler, image, texUnit) {
+	gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);// Flip the image's y-axis
+	// Make the texture unit active
+	if (texUnit === 0) {
+		gl.activeTexture(gl.TEXTURE0);
+	} else if(texUnit === 1){
+		gl.activeTexture(gl.TEXTURE1);
+	} else {
+		gl.activeTexture(gl.TEXTURE2);
+	}
+	// Bind the texture object to the target
+	gl.bindTexture(gl.TEXTURE_2D, texture);   
+	// Set the image to texture
+	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+	// Set texture parameters
+	gl.generateMipmap(gl.TEXTURE_2D);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+	if (texUnit !== 2){
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);	
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+	}
 }
