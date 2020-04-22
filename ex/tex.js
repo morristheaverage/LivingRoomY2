@@ -32,6 +32,9 @@ const FSHADER_SOURCE =
   'void main() {\n' +
   '  if (u_UseTextures) {\n' +
   '    vec4 color = texture2D(u_Sampler, v_TexCoords);\n' +
+  '    if (!(color.r > 0.95 && color.g > 0.95 && color.b > 0.95 )){\n' +
+  '      color.a = 0.5;\n' +
+  '    }\n' +
   '    gl_FragColor = color;\n' +
   '  } else {\n' +
   '    gl_FragColor = v_Color;\n' +
@@ -115,7 +118,7 @@ function main() {
 		return false;
 	}
 	texture0.image.onload = function(){ loadTexAndDraw(gl, n, texture0, u_Sampler, u_UseTextures); };
-	texture0.image.src = '../img/wood.png';
+	texture0.image.src = '../img/fish.png';
 }
 
 function initSquareVertexBuffers(gl) {

@@ -38,7 +38,6 @@ var FSHADER_SOURCE =
   '		}else{\n' +
   '			gl_FragColor = v_Color;\n' +
   '		}\n' +
-  '		if (gl_FragColor.a < 0.5) discard;\n' +
   '}\n';
 
 // eslint-disable-next-line no-undef
@@ -73,6 +72,7 @@ var seatMatrices = [];
 var shapes = {
 	'wall': {color: {r: 1.0, g: 1.0, b: 1.0, alpha: 1.0}, type: 'square', tes: true},
 	'fish': {color: {r: 0.0, g: 0.0, b: 0.0, alpha: 0.0}, type: 'square', tes: false},
+	'mirror': {color: {r: 0.0, g:0.0, b:0.0, alpha: 1.0}, type: 'square', tes: false},
 	'furniture': {color: {r: 1.0, g: 0.0, b: 0.0, alpha: 1.0}, type: 'cube'},
 	'glass': {color: {r: 0.2, g: 1.0, b: 0.2, alpha: 0.1}, type: 'cube'}
 };
@@ -86,15 +86,28 @@ let h = 5;
 let d = 10;
 let w = 12;
 
+// Let's make a mirror
+let glm;
+
 // eslint-disable-next-line no-unused-vars
 function main() {
 	// Retrieve <canvas> element
-	var canvas = document.getElementById('webgl');
+	let canvas = document.getElementById('webgl');
+	// Also a mirror canvas to turn into a texture
+	let mirror = document.createElement('canvas');
 
 	// Get the rendering context for WebGL
 	// eslint-disable-next-line no-undef
-	var gl = getWebGLContext(canvas);
+	let gl = getWebGLContext(canvas);
 	if (!gl) {
+		console.log('Failed to get the rendering context for WebGL');
+		return;
+	}
+	console.log(gl);
+	// And mirrored...
+	// eslint-disable-next-line no-undef
+	glm = getWebGLContext(mirror);
+	if (!glm) {
 		console.log('Failed to get the rendering context for WebGL');
 		return;
 	}
@@ -105,49 +118,93 @@ function main() {
 		console.log('Failed to intialize shaders.');
 		return;
 	}
+	// And mirrored...
+	// eslint-disable-next-line no-undef
+	if (!initShaders(glm, VSHADER_SOURCE, FSHADER_SOURCE)) {
+		console.log('Failed to intialize shaders.');
+		return;
+	}
 
 	// Set clear color and enable hidden surface removal
 	gl.clearColor(0.0, 0.0, 0.0, 1.0);
+	glm.clearColor(0.0, 0.0, 0.0, 1.0);
 	gl.enable(gl.DEPTH_TEST);
+	glm.enable(gl.DEPTH_TEST);
 
 	// Enable transparency
 	gl.enable(gl.BLEND);
+	glm.enable(gl.BLEND);
+	// And mirrored...
 	gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+	glm.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
 	// Clear color and depth buffer
 	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+	// And mirrored...
+	glm.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
 	// Get the storage locations of uniform attributes
-	var u_ModelMatrix = gl.getUniformLocation(gl.program, 'u_ModelMatrix');
-	var u_ViewMatrix = gl.getUniformLocation(gl.program, 'u_ViewMatrix');
-	var u_NormalMatrix = gl.getUniformLocation(gl.program, 'u_NormalMatrix');
-	var u_ProjMatrix = gl.getUniformLocation(gl.program, 'u_ProjMatrix');
-	var u_LightColor = gl.getUniformLocation(gl.program, 'u_LightColor');
-	var u_LightDirection = gl.getUniformLocation(gl.program, 'u_LightDirection');
+	gl.u_ModelMatrix = gl.getUniformLocation(gl.program, 'u_ModelMatrix');
+	gl.u_ViewMatrix = gl.getUniformLocation(gl.program, 'u_ViewMatrix');
+	gl.u_NormalMatrix = gl.getUniformLocation(gl.program, 'u_NormalMatrix');
+	gl.u_ProjMatrix = gl.getUniformLocation(gl.program, 'u_ProjMatrix');
+	gl.u_LightColor = gl.getUniformLocation(gl.program, 'u_LightColor');
+	gl.u_LightDirection = gl.getUniformLocation(gl.program, 'u_LightDirection');
+
+	// And mirrored...
+	glm.u_ModelMatrix = glm.getUniformLocation(glm.program, 'u_ModelMatrix');
+	glm.u_ViewMatrix = glm.getUniformLocation(glm.program, 'u_ViewMatrix');
+	glm.u_NormalMatrix = glm.getUniformLocation(glm.program, 'u_NormalMatrix');
+	glm.u_ProjMatrix = glm.getUniformLocation(glm.program, 'u_ProjMatrix');
+	glm.u_LightColor = glm.getUniformLocation(glm.program, 'u_LightColor');
+	glm.u_LightDirection = glm.getUniformLocation(glm.program, 'u_LightDirection');
 
 
-	if (!u_ModelMatrix || !u_ViewMatrix || !u_NormalMatrix ||
-      !u_ProjMatrix || !u_LightColor || !u_LightDirection ) { 
-		console.log(!u_ModelMatrix);
-		console.log(!u_ViewMatrix);
-		console.log(!u_NormalMatrix);
-		console.log(!u_ProjMatrix);
-		console.log(!u_LightColor);
-		console.log(!u_LightDirection);
+	if (!gl.u_ModelMatrix || !gl.u_ViewMatrix || !gl.u_NormalMatrix ||
+      !gl.u_ProjMatrix || !gl.u_LightColor || !gl.u_LightDirection ) { 
+		console.log(!gl.u_ModelMatrix);
+		console.log(!gl.u_ViewMatrix);
+		console.log(!gl.u_NormalMatrix);
+		console.log(!gl.u_ProjMatrix);
+		console.log(!gl.u_LightColor);
+		console.log(!gl.u_LightDirection);
 		console.log('Failed to Get the storage locations of u_ModelMatrix, u_ViewMatrix, and/or u_ProjMatrix');
 		return;
 	}
 
+	// And mirrored...
+	if (!glm.u_ModelMatrix || !glm.u_ViewMatrix || !glm.u_NormalMatrix ||
+		!glm.u_ProjMatrix || !glm.u_LightColor || !glm.u_LightDirection ) { 
+		console.log(!glm.u_ModelMatrix);
+		console.log(!glm.u_ViewMatrix);
+		console.log(!glm.u_NormalMatrix);
+		console.log(!glm.u_ProjMatrix);
+		console.log(!glm.u_LightColor);
+		console.log(!glm.u_LightDirection);
+		console.log('Failed to Get the storage locations of um_ModelMatrix, um_ViewMatrix, and/or um_ProjMatrix');
+		return;
+	}
+
 	// Set the light color (white)
-	gl.uniform3f(u_LightColor, 1.0, 1.0, 1.0);
+	gl.uniform3f(gl.u_LightColor, 1.0, 1.0, 1.0);
+	// And mirrored...
+	glm.uniform3f(glm.u_LightColor, 1.0, 1.0, 1.0);
 	
 
 	// Calculate the view matrix and the projection matrix
 	viewMatrix.setLookAt(0, 0, 15, 0, 0, -100, 0, 1, 0);
 	projMatrix.setPerspective(30, canvas.width/canvas.height, 1, 100);
 	// Pass the model, view, and projection matrix to the uniform variable respectively
-	gl.uniformMatrix4fv(u_ViewMatrix, false, viewMatrix.elements);
-	gl.uniformMatrix4fv(u_ProjMatrix, false, projMatrix.elements);
+	gl.uniformMatrix4fv(gl.u_ViewMatrix, false, viewMatrix.elements);
+	gl.uniformMatrix4fv(gl.u_ProjMatrix, false, projMatrix.elements);
+
+	// And mirrored...
+	// Calculate the view matrix and the projection matrix
+	viewMatrix.setLookAt(0, 0, 15, 0, 0, -100, 0, 1, 0);
+	projMatrix.setPerspective(30, canvas.width/canvas.height, 1, 100);
+	// Pass the model, view, and projection matrix to the uniform variable respectively
+	gl.uniformMatrix4fv(glm.u_ViewMatrix, false, viewMatrix.elements);
+	gl.uniformMatrix4fv(glm.u_ProjMatrix, false, projMatrix.elements);
 
 	// Load seat data
 	initSeatMatrices();
@@ -203,39 +260,59 @@ function main() {
 	}
 
 	var vdebug = [];
-	for (var i = 0; i < vertices.length/3; i++){
+	for (i = 0; i < vertices.length/3; i++){
 		vdebug.push([vertices[3*i], vertices[3*i+1], vertices[3*i+2], colors[4*i], colors[4*i+1], colors[4*i+2], texCoords[2*i], texCoords[2*i+1]]);
 	}
 	
 	// Write the vertex property to buffers (coordinates, colors and normals)
 	if (!initArrayBuffer(gl, 'a_Position', new Float32Array(vertices), 3, gl.FLOAT)) return -1;
+	if (!initArrayBuffer(glm, 'a_Position', new Float32Array(vertices), 3, glm.FLOAT)) return -1;
 	if (!initArrayBuffer(gl, 'a_Color', new Float32Array(colors), 4, gl.FLOAT)) return -1;
+	if (!initArrayBuffer(glm, 'a_Color', new Float32Array(colors), 4, glm.FLOAT)) return -1;
 	if (!initArrayBuffer(gl, 'a_Normal', new Float32Array(normals), 3, gl.FLOAT)) return -1;
+	if (!initArrayBuffer(glm, 'a_Normal', new Float32Array(normals), 3, glm.FLOAT)) return -1;
 	if (!initArrayBuffer(gl, 'a_TexCoords', new Float32Array(texCoords), 2, gl.FLOAT)) return -1;
+	if (!initArrayBuffer(glm, 'a_TexCoords', new Float32Array(texCoords), 2, glm.FLOAT)) return -1;
 
 	// Write the indices to the buffer object
-	var indexBuffer = gl.createBuffer();
+	let indexBuffer = gl.createBuffer();
 	if (!indexBuffer) {
 		console.log('Failed to create the buffer object');
+		return false;
+	}
+
+	// And mirrored...
+	let mirrorIndexBuffer = glm.createBuffer();
+	if (!mirrorIndexBuffer) {
+		console.log('Failed to create the mirror buffer object');
 		return false;
 	}
 
 	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
 	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
 
+	// And mirrored...
+	glm.bindBuffer(glm.ELEMENT_ARRAY_BUFFER, mirrorIndexBuffer);
+	glm.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+
 
 	// Set up texture stuff
-	var u_UseTextures = gl.getUniformLocation(gl.program, 'u_UseTextures');
-	var u_Sampler = gl.getUniformLocation(gl.program, 'u_Sampler');
+	gl.u_UseTextures = gl.getUniformLocation(gl.program, 'u_UseTextures');
+	gl.u_Sampler = gl.getUniformLocation(gl.program, 'u_Sampler');
+
+	// And mirrored...
+	glm.u_UseTextures = glm.getUniformLocation(glm.program, 'u_UseTextures');
+	glm.u_Sampler = glm.getUniformLocation(glm.program, 'u_Sampler');
 
 	// Load textures
 	const floorPic = new Image();
-	var floorTex = gl.createTexture();
+	let floorTex = gl.createTexture();
+	let mirrorFloorTex = glm.createTexture();
 	floorPic.onload = () => {
-		// document.body.appendChild(floorPic);
-		loadTexture(gl, floorTex, u_Sampler, floorPic, 0);
+		loadTexture(gl, floorTex, floorPic, 0);
+		loadTexture(glm, mirrorFloorTex, floorPic, 0);
 		floorLoaded = true;
-		draw(gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures, u_Sampler);
+		draw(gl, true);
 		console.log('load', floorLoaded);
 	};
 	console.log('loaded', floorLoaded);
@@ -244,10 +321,12 @@ function main() {
 
 	const wallPic = new Image();
 	let wallTex = gl.createTexture();
+	let mirrorWallTex = glm.createTexture();
 	wallPic.onload = () => {
-		loadTexture(gl, wallTex, u_Sampler, wallPic, 1);
+		loadTexture(gl, wallTex, wallPic, 1);
+		loadTexture(glm, mirrorWallTex, wallPic, 1);
 		wallLoaded = true;
-		draw(gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures, u_Sampler);
+		draw(gl, true);
 	};
 	wallPic.src = '../img/blue.jpg';
 
@@ -255,22 +334,24 @@ function main() {
 
 	const fishPic = new Image();
 	let fishTex = gl.createTexture();
+	let mirrorFishTex = glm.createTexture();
 	fishPic.onload = () => {
-		loadTexture(gl, fishTex, u_Sampler, fishPic, 2);
+		loadTexture(gl, fishTex, fishPic, 2);
+		loadTexture(glm, mirrorFishTex, fishPic, 2);
 		fishLoaded = true;
-		draw(gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures, u_Sampler);
+		draw(gl, true);
 	};
 	fishPic.src = '../img/fish.png';
 
 	
 	document.onkeydown = function(ev){
-		keydown(ev, gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures, u_Sampler);
+		keydown(ev, gl);
 	};
 
-	draw(gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures, u_Sampler);
+	draw(gl, true);
 }
 
-function keydown(ev, gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures, u_Sampler) {
+function keydown(ev, gl) {
 	switch (ev.keyCode) {
 	case 40: // Up arrow key -> the positive rotation of arm1 around the y-axis
 		g_xAngle = (g_xAngle + ANGLE_STEP) % 360;
@@ -303,7 +384,7 @@ function keydown(ev, gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseT
 	}
 
 	// Draw the scene
-	draw(gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures, u_Sampler);
+	draw(gl, true);
 }
 
 
@@ -399,6 +480,7 @@ function initSquareVertexBuffers(offset, colour, tes) {
 		0.5, 0.0, 0.5      // v3
 	];
 
+	// eslint-disable-next-line no-unused-vars
 	var r, g, b, alpha;
 	r = colour.r;
 	g = colour.g;
@@ -474,7 +556,7 @@ function popMatrix() { // Retrieve the matrix from the array
 	return g_matrixStack.pop();
 }
 
-function draw(gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures, u_Sampler) {
+function draw(gl, drawMirror) {
 	// gl.uniform1i(u_Sampler, 0); // if we did we would use gl.TEXTURE0
 	
 	thisLoop = new Date();
@@ -490,7 +572,7 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures
 	gl.cullFace(gl.BACK);
 
 	// Set the light direction (in the world coordinate)
-	setLightDirection(gl, u_LightDirection);
+	setLightDirection(gl);
 
 	/*
 	###################################    Draw the walls and floor of the room    ###################################
@@ -506,30 +588,30 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures
 	modelMatrix.translate(0, -h/2, 0);
 	modelMatrix.scale(w, 1.0, d);
 	// Wooden floor-----------------------------------------------------------
-	gl.uniform1i(u_Sampler, 0);
+	gl.uniform1i(gl.u_Sampler, 0);
 	if(floorLoaded) {
-		gl.uniform1i(u_UseTextures, true);
+		gl.uniform1i(gl.u_UseTextures, true);
 	} else {
-		gl.uniform1i(u_UseTextures, false);
+		gl.uniform1i(gl.u_UseTextures, false);
 	}
-	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'wall');
+	drawshape(gl, 'wall');
 	// -----------------------------------------------------------------------
 	modelMatrix = popMatrix();
 
 	// The rest doesn't use a texture
 	if(wallLoaded) {
-		gl.uniform1i(u_UseTextures, true);
+		gl.uniform1i(gl.u_UseTextures, true);
 	}else{
-		gl.uniform1i(u_UseTextures, false);
+		gl.uniform1i(gl.u_UseTextures, false);
 	}
-	gl.uniform1i(u_Sampler, 1);
+	gl.uniform1i(gl.u_Sampler, 1);
 
 	// Make back wall
 	pushMatrix(modelMatrix);
 	modelMatrix.rotate(90, 1, 0, 0);
 	modelMatrix.translate(0, -d/2, 0);
 	modelMatrix.scale(w, 1, h);
-	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'wall');
+	drawshape(gl, 'wall');
 	modelMatrix = popMatrix();
 
 	// Make front wall
@@ -537,7 +619,7 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures
 	modelMatrix.rotate(-90, 1, 0, 0);
 	modelMatrix.translate(0, -d/2, 0);
 	modelMatrix.scale(w, 1, h);
-	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'wall');
+	drawshape(gl, 'wall');
 	modelMatrix = popMatrix();
 
 	// Make left wall
@@ -545,7 +627,7 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures
 	modelMatrix.rotate(-90, 0, 0, 1);
 	modelMatrix.translate(0, -w/2, 0);
 	modelMatrix.scale(h, 1, d);
-	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'wall');
+	drawshape(gl, 'wall');
 	modelMatrix = popMatrix();
 
 	// Make right wall
@@ -553,14 +635,14 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures
 	modelMatrix.rotate(90, 0, 0, 1);
 	modelMatrix.translate(0, -w/2, 0);
 	modelMatrix.scale(h, 1, d);
-	drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'wall');
+	drawshape(gl, 'wall');
 	modelMatrix = popMatrix();
 
 	/*
 	###################################    Draw the chair and sofa of the room    ###################################
 	*/
 
-	gl.uniform1i(u_UseTextures, false);
+	gl.uniform1i(gl.u_UseTextures, false);
 
 	var dimensions = {
 		x: 0.3,
@@ -586,7 +668,7 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures
 		pushMatrix(modelMatrix);
 		modelMatrix.translate(((1-anim)*posx + anim*newposx) * w/2, newY * h/2, ((1-anim)*posz + anim*newposz) * d/2);
 		modelMatrix.rotate((1-anim)*rot + anim*newrot, 0, 1, 0);
-		drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions);
+		drawSeat(gl, dimensions);
 		modelMatrix = popMatrix();
 	}
 
@@ -594,28 +676,43 @@ function draw(gl, u_ModelMatrix, u_NormalMatrix, u_LightDirection, u_UseTextures
 	dimensions = {x: 2, y: 1, z: 1};
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(0, -h/2, 0);
-	var tableHeight = drawTable(gl, u_ModelMatrix, u_NormalMatrix, dimensions);
+	var tableHeight = drawTable(gl, dimensions);
 	modelMatrix = popMatrix();
 
+	// Fish tank
 	var tankHeight = 1;
 	dimensions.y = tankHeight;
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(0, tableHeight - h/2, 0);
-	drawFishTank(gl, u_ModelMatrix, u_NormalMatrix, dimensions, tankTilt, u_Sampler, u_UseTextures);
+	drawFishTank(gl, dimensions, tankTilt);
 	modelMatrix = popMatrix();
+
+	// Mirror
+	if (drawMirror) {
+		pushMatrix(modelMatrix);
+		modelMatrix.translate(0, 0, 0.01-d/2);
+		modelMatrix.rotate(180, 0, 1, 0);
+		modelMatrix.rotate(-90, 1, 0, 0);
+
+		let mirTex = gl.createTexture();
+		loadTexture(gl, mirTex, glm.canvas, 3);
+		gl.uniform1i(gl.u_Sampler, 3);
+		drawshape(gl, 'mirror');
+		modelMatrix = popMatrix();
+	}
 }
 
 
-function drawshape(gl, u_ModelMatrix, u_NormalMatrix, name) {
+function drawshape(gl, name) {
 	pushMatrix(modelMatrix);
 
 	// Pass the model matrix to the uniform variable
-	gl.uniformMatrix4fv(u_ModelMatrix, false, modelMatrix.elements);
+	gl.uniformMatrix4fv(gl.u_ModelMatrix, false, modelMatrix.elements);
 
 	// Calculate the normal transformation matrix and pass it to u_NormalMatrix
 	g_normalMatrix.setInverseOf(modelMatrix);
 	g_normalMatrix.transpose();
-	gl.uniformMatrix4fv(u_NormalMatrix, false, g_normalMatrix.elements);
+	gl.uniformMatrix4fv(gl.u_NormalMatrix, false, g_normalMatrix.elements);
 
 	// Draw the shape
 	var n = shapes[name].n;
@@ -623,29 +720,21 @@ function drawshape(gl, u_ModelMatrix, u_NormalMatrix, name) {
 
 	// console.log(name + ' ' + n + ' ' + offset);
 	gl.drawElements(gl.TRIANGLES, n, gl.UNSIGNED_SHORT, offset*2);
+	if (name !== 'mirror') {
+		glm.drawElements(glm.TRIANGLES, n, glm.UNSIGNED_BYTE, offset*2);
+	}
 
 	modelMatrix = popMatrix();
 }
 
 function initSeatMatrices() {
+	// eslint-disable-next-line no-undef
 	var seatMatrix = new Matrix4();
 	seatMatrix.setTranslate(0, 0, 0);
 
 	// Model the 4 chair legs
 	var legHeight = 0;
-	/*
-	pushMatrix(modelMatrix);
-	modelMatrix.translate(1.5, 0.5, 1.5);  // Translation
-	drawshape(gl, u_ModelMatrix, u_NormalMatrix, nCube);
-	modelMatrix.translate(0, 0, -3);
-	drawshape(gl, u_ModelMatrix, u_NormalMatrix, nCube);
-	modelMatrix.translate(-3, 0, 0);
-	drawshape(gl, u_ModelMatrix, u_NormalMatrix, nCube);
-	modelMatrix.translate(0, 0, 3);
-	drawshape(gl, u_ModelMatrix, u_NormalMatrix, nCube);
-	modelMatrix = popMatrix();
-	*/
-
+	
 	// Draw the chair seat
 	var seatThickness = 0.75;
 	pushMatrix(seatMatrix);
@@ -694,7 +783,7 @@ function initSeatMatrices() {
 	// console.log(seatMatrices);
 }
 
-function drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions) {
+function drawSeat(gl, dimensions) {
 	
 
 	modelMatrix.scale(dimensions.x, dimensions.y, dimensions.z);
@@ -703,32 +792,32 @@ function drawSeat(gl, u_ModelMatrix, u_NormalMatrix, dimensions) {
 		pushMatrix(modelMatrix);
 		modelMatrix.concat(componentMatrix);
 		// console.log(modelMatrix);
-		drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'furniture');
+		drawshape(gl, 'furniture');
 		modelMatrix = popMatrix();
 	}
 }
 
-function drawTable(gl, u_ModelMatrix, u_NormalMatrix, dimensions) {
+function drawTable(gl, dimensions) {
 
 	modelMatrix.scale(dimensions.x, dimensions.y, dimensions.z);
 
 	var baseHeight = 1;
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(0, baseHeight/2, 0);
-	// drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'furniture');
+	drawshape(gl, 'furniture');
 	modelMatrix = popMatrix();
 
 	var tableThickness = 0.5;
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(0, baseHeight + tableThickness/2, 0);
 	modelMatrix.scale(2, tableThickness, 2);
-	// drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'furniture');
+	drawshape(gl, 'furniture');
 	modelMatrix = popMatrix();
 
 	return dimensions.y * (baseHeight + tableThickness);
 }
 
-function drawFishTank(gl, u_ModelMatrix, u_NormalMatrix, dimensions, tilt, u_Sampler, u_UseTextures) {
+function drawFishTank(gl, dimensions, tilt) {
 	pushMatrix(modelMatrix);
 	var gt = 0.1;
 	var depth = 0.6;
@@ -751,33 +840,36 @@ function drawFishTank(gl, u_ModelMatrix, u_NormalMatrix, dimensions, tilt, u_Sam
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(0, -(1-depth-gt/2)/2 + dimensions.y/2, 0);
 	modelMatrix.scale(1-gt, depth-gt, 1-gt);
-	// drawshape(gl, u_ModelMatrix, u_NormalMatrix, choice);
+	drawshape(gl, choice);
 	modelMatrix = popMatrix();
 
 	// Fish tank - glass	
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(0, dimensions.y/2, 0);
 	modelMatrix.scale(1, 1, 1);
-	// drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'glass');
+	drawshape(gl, 'glass');
 	modelMatrix = popMatrix();
 
 	modelMatrix = popMatrix();
 
 	// Tim the fish
 	if (fishLoaded) {
-		gl.uniform1i(u_Sampler, 2);
-		gl.uniform1i(u_UseTextures, true);
+		gl.uniform1i(gl.u_Sampler, 2);
+		gl.uniform1i(gl.u_UseTextures, true);
 		gl.disable(gl.CULL_FACE);
 		// Position Tim
 		pushMatrix(modelMatrix);
 		modelMatrix.translate(0, -(1-depth-gt/2)/2 + dimensions.y/2, 0);
 		modelMatrix.rotate(-90, 1, 0, 0);
-		drawshape(gl, u_ModelMatrix, u_NormalMatrix, 'fish');
+		drawshape(gl, 'fish');
 		modelMatrix = popMatrix();
+
+		gl.enable(gl.CULL_FACE);
+		gl.cullFace(gl.BACK);
 	}
 }
 
-function setLightDirection(gl, u_LightDirection) {
+function setLightDirection(gl) {
 	// eslint-disable-next-line no-undef
 	var lightDirection = new Vector3([2.0, 3.0, 4.0]);
 	// eslint-disable-next-line no-undef
@@ -788,9 +880,10 @@ function setLightDirection(gl, u_LightDirection) {
 	var x = lightDirection.elements[0];
 	var y = lightDirection.elements[1];
 	var z = lightDirection.elements[2];
+	// eslint-disable-next-line no-undef
 	var rotatedLightDir = transformPoint(new Vector3([x, y, z]), new Matrix4(lightMatrix));
 	rotatedLightDir.normalize();
-	gl.uniform3fv(u_LightDirection, rotatedLightDir.elements);
+	gl.uniform3fv(gl.u_LightDirection, rotatedLightDir.elements);
 }
 
 function transformPoint(point, m) {
@@ -810,25 +903,92 @@ function transformPoint(point, m) {
 // Initialize a texture and load an image.
 // When the image finished loading copy it into the texture.
 //
-function loadTexture(gl, texture, u_Sampler, image, texUnit) {
+// function loadTexture(gl, texture, image, texUnit) {
+// 	gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);// Flip the image's y-axis
+// 	// Make the texture unit active
+// 	switch(texUnit){
+// 	case 0:
+// 		gl.activeTexture(gl.TEXTURE0);
+// 		break;
+// 	case 1:
+// 		gl.activeTexture(gl.TEXTURE1);
+// 		break;
+// 	case 2:
+// 		gl.activeTexture(gl.TEXTURE2);
+// 		break;
+// 	default:
+// 		gl.activeTexture(gl.TEXTURE3);
+// 		break;
+// 	}
+	
+// 	// Bind the texture object to the target
+// 	gl.bindTexture(gl.TEXTURE_2D, texture);
+// 	// Set the image to texture
+// 	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+// 	// Set texture parameters
+// 	gl.generateMipmap(gl.TEXTURE_2D);
+// 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+// 	if (texUnit !== 2){
+// 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+// 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);	
+// 	}
+// }
+
+function loadTexture(gl, texture, image, texUnit) {
 	gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);// Flip the image's y-axis
 	// Make the texture unit active
-	if (texUnit === 0) {
+	switch(texUnit){
+	case 0:
 		gl.activeTexture(gl.TEXTURE0);
-	} else if(texUnit === 1){
+		break;
+	case 1:
 		gl.activeTexture(gl.TEXTURE1);
-	} else {
+		break;
+	case 2:
 		gl.activeTexture(gl.TEXTURE2);
+		break;
+	default:
+		gl.activeTexture(gl.TEXTURE3);
+		break;
 	}
+
 	// Bind the texture object to the target
-	gl.bindTexture(gl.TEXTURE_2D, texture);   
-	// Set the image to texture
-	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-	// Set texture parameters
-	gl.generateMipmap(gl.TEXTURE_2D);
-	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-	if (texUnit !== 2){
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);	
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+	gl.bindTexture(gl.TEXTURE_2D, texture);
+  
+	// Because images have to be download over the internet
+	// they might take a moment until they are ready.
+	// Until then put a single pixel in the texture so we can
+	// use it immediately. When the image has finished downloading
+	// we'll update the texture with the contents of the image.
+	const level = 0;
+	const internalFormat = gl.RGBA;
+	const width = 1;
+	const height = 1;
+	const border = 0;
+	const srcFormat = gl.RGBA;
+	const srcType = gl.UNSIGNED_BYTE;
+	const pixel = new Uint8Array([0, 0, 255, 255]);  // opaque blue
+	gl.texImage2D(gl.TEXTURE_2D, level, internalFormat, width, height, border, srcFormat, srcType, pixel);
+  
+	
+	gl.bindTexture(gl.TEXTURE_2D, texture);
+	gl.texImage2D(gl.TEXTURE_2D, level, internalFormat, srcFormat, srcType, image);
+
+	// WebGL1 has different requirements for power of 2 images
+	// vs non power of 2 images so check if the image is a
+	// power of 2 in both dimensions.
+	if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
+		// Yes, it's a power of 2. Generate mips.
+		gl.generateMipmap(gl.TEXTURE_2D);
+	} else {
+		// No, it's not a power of 2. Turn off mips and set
+		// wrapping to clamp to edge
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
 	}
+}
+
+function isPowerOf2(value) {
+	return (value & (value - 1)) == 0;
 }
