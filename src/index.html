@@ -6,11 +6,20 @@
   </head>
 
   <body onload="main()">
-    <canvas id="webgl" width="1400" height="800">
+    <canvas id="webgl" width="800" height="600">
     Please use a browser that supports "canvas"
     </canvas>
     <div id="overlay">
       <div>FPS: <span id="fps"></span></div>
+      <h3>Instructions</h3>
+      <ul>
+        <li>Press/hold arrow keys to twist left and right and move forwards and backwards</li>
+        <li>Use q and e buttons to tilt the camera view</li>
+        <li>Press/hold space bar to animate chairs</li>
+        <li>Use a and d buttons to tilt the fish tank</li>
+        <li>If textures do not display make sure you are hosting the website directory in a server e.g. npm http-server</li>
+        <li>Press L to toggle the light on/off and also press r, g and b buttons to individually toggle red, blue and green componenets of the light colour</li>
+      </ul>
     </div>
 
     <script src="../lib/webgl-utils.js"></script>

@@ -1,43 +1,77 @@
+/* eslint-disable no-undef */
 /* eslint-disable no-console */
 // Vertex shader program
 var VSHADER_SOURCE =
+  // Declare attribute variables
   'attribute vec4 a_Position;\n' +
   'attribute vec4 a_Color;\n' +
   'attribute vec4 a_Normal;\n' +        // Normal
   'attribute vec2 a_TexCoords;\n' +
+  // Declare transformation matrices
   'uniform mat4 u_ModelMatrix;\n' +
   'uniform mat4 u_NormalMatrix;\n' +
   'uniform mat4 u_ViewMatrix;\n' +
   'uniform mat4 u_ProjMatrix;\n' +
+  'uniform mat4 u_LightMatrix;\n' +
+  // Declare light data
   'uniform vec3 u_LightColor;\n' +     // Light color
   'uniform vec3 u_LightDirection;\n' + // Light direction (in the world coordinate, normalized)
+  'uniform vec4 u_LightPosition;\n' +
+  // Declare data to pass to fragment shader
+  'varying vec4 v_Position;\n' +
   'varying vec4 v_Color;\n' +
+  'varying vec3 v_Normal;\n' +
   'varying vec2 v_TexCoords;\n' +
+  'varying vec4 v_LightPosition;\n' +
+  'varying vec3 v_LightColor;\n' +
+  // Start main function
   'void main() {\n' +
-  '  gl_Position = u_ProjMatrix * u_ViewMatrix * u_ModelMatrix * a_Position;\n' +
-  '  vec3 normal = normalize((u_NormalMatrix * a_Normal).xyz);\n' +
-  '  float ambient = 0.4;\n' +
-  '  float nDotL = max(dot(normal, u_LightDirection), ambient);\n' +
-  // Calculate the color due to diffuse reflection
-  '  vec3 diffuse = u_LightColor * a_Color.rgb * nDotL;\n' +
-  '  v_Color = vec4(diffuse, a_Color.a);\n' +
+  // Set vertex position
+  '  v_Position = u_ProjMatrix * u_ViewMatrix * u_ModelMatrix * a_Position;\n' +
+  '  gl_Position = v_Position;\n' +
+  '  v_Normal = normalize((u_NormalMatrix * a_Normal).xyz);\n' +
+  // Set light data
+  '  v_LightPosition = u_ProjMatrix * u_ViewMatrix * u_LightMatrix * u_LightPosition;\n' +
+  '  v_LightColor = u_LightColor.xyz;\n' +
+  '  v_Color = a_Color;\n' +
   '  v_TexCoords = a_TexCoords;\n' +
   '}\n';
 
 // Fragment shader program
 var FSHADER_SOURCE =
   'precision mediump float;\n' +
+  // Declare data passed from vertex attributes
+  'varying vec4 v_Position;\n' +
   'varying vec4 v_Color;\n' +
+  'varying vec3 v_Normal;\n' +
+  // Declare texture variables
   'uniform bool u_UseTextures;\n' +
   'uniform sampler2D u_Sampler;\n' +
   'varying vec2 v_TexCoords;\n' +
+  // Light data
+  'varying vec4 v_LightPosition;\n' +
+  'varying vec3 v_LightColor;\n' +
+  'uniform vec3 u_AmbientLight;\n' +
   'void main() {\n' +
+  // Set color from texture or otherwise
+  // Apply point lighting to color
+  '		vec3 normal = normalize(v_Normal);\n' +
+  '		vec3 lightDir = normalize(v_LightPosition.xyz - v_Position.xyz);\n' +
+  '		float nDotL = max(dot(v_Normal, lightDir), 0.0);\n' +
+  '		vec3 diffuse;\n' +
+  '		vec3 ambient;\n' +
+  '		float alpha;\n' +
   '		if (u_UseTextures){\n' +
   '			vec4 TexColor = texture2D(u_Sampler, v_TexCoords);\n' +
-  '			gl_FragColor = vec4(TexColor.rgb, 1.0);\n' +
+  '			alpha = TexColor.a;\n' +
+  '			diffuse = v_LightColor * TexColor.rgb * nDotL;\n' +
+  '			ambient = u_AmbientLight * TexColor.rgb;\n' +
   '		}else{\n' +
-  '			gl_FragColor = v_Color;\n' +
+  '			alpha = v_Color.a;\n' +
+  '			diffuse = v_LightColor * v_Color.rgb * nDotL;\n' +
+  '			ambient = u_AmbientLight * v_Color.rgb;\n' +
   '		}\n' +
+  '		gl_FragColor = vec4(diffuse + ambient, alpha);\n' +
   '}\n';
 
 // eslint-disable-next-line no-undef
@@ -49,10 +83,11 @@ var projMatrix = new Matrix4();  // The projection matrix
 // eslint-disable-next-line no-undef
 var g_normalMatrix = new Matrix4();  // Coordinate transformation matrix for normals
 
-var ANGLE_STEP = 3.0;  // The increments of rotation angle (degrees)
-var g_xAngle = 0.0;    // The rotation x angle (degrees)
-var g_yAngle = 0.0;    // The rotation y angle (degrees)
-var g_zAngle = 0.0;    // The rotation z angle (degrees)
+let ANGLE_STEP = 3.0;  // The increments of rotation angle (degrees)
+let FOOT_STEP = 0.2;   // The increments of forwards and backwards steps
+let g_xAngle = 0.0;    // The rotation x angle (degrees)
+let g_yAngle = 0.0;    // The rotation y angle (degrees)
+let g_zAngle = 0.0;    // The rotation z angle (degrees)
 
 var tankTilt = 0.0;
 const maxTilt = 45.0;
@@ -68,18 +103,25 @@ fpsElement.append(fpsNode);
 
 var seatMatrices = [];
 
+let lightOn = true;
+let light = {r: 1.0, g: 1.0, b: 1.0};
+
 // A global object to contain buffer info
 var shapes = {
 	'wall': {color: {r: 1.0, g: 1.0, b: 1.0, alpha: 1.0}, type: 'square', tes: true},
 	'fish': {color: {r: 0.0, g: 0.0, b: 0.0, alpha: 0.0}, type: 'square', tes: false},
 	'mirror': {color: {r: 0.0, g:0.0, b:0.0, alpha: 1.0}, type: 'square', tes: false},
 	'furniture': {color: {r: 1.0, g: 0.0, b: 0.0, alpha: 1.0}, type: 'cube'},
+	'tv': {color: {r: 0.1, g: 0.1, b: 0.1, alpha: 1.0}, type: 'cube'},
+	'screen': {color: {r: 0.0, g: 0.0, b: 0.0, alpha: 1.0}, type: 'square', tes: true},
 	'glass': {color: {r: 0.2, g: 1.0, b: 0.2, alpha: 0.1}, type: 'cube'}
 };
 
-var floorLoaded = false;
-var wallLoaded = false;
-var fishLoaded = false;
+let floorLoaded = false;
+let wallLoaded = false;
+let fishLoaded = false;
+let leatherLoaded = false;
+let tableLoaded = false;
 
 // Room dimensions
 let h = 5;
@@ -87,27 +129,26 @@ let d = 10;
 let w = 12;
 
 // Let's make a mirror
-let glm;
+let mirror;
+
+// We need a canvas to draw to
+let canvas;
+
+// Location vectors
+// eslint-disable-next-line no-undef
+let pos = new Vector3(new Float32Array([0.0, h/10, 2*d]));
+let facing = new Vector3(new Float32Array([0.0, 0.0, -1.0]));
 
 // eslint-disable-next-line no-unused-vars
 function main() {
 	// Retrieve <canvas> element
-	let canvas = document.getElementById('webgl');
-	// Also a mirror canvas to turn into a texture
-	let mirror = document.createElement('canvas');
+	canvas = document.getElementById('webgl');
+
 
 	// Get the rendering context for WebGL
 	// eslint-disable-next-line no-undef
 	let gl = getWebGLContext(canvas);
 	if (!gl) {
-		console.log('Failed to get the rendering context for WebGL');
-		return;
-	}
-	console.log(gl);
-	// And mirrored...
-	// eslint-disable-next-line no-undef
-	glm = getWebGLContext(mirror);
-	if (!glm) {
 		console.log('Failed to get the rendering context for WebGL');
 		return;
 	}
@@ -118,93 +159,43 @@ function main() {
 		console.log('Failed to intialize shaders.');
 		return;
 	}
-	// And mirrored...
-	// eslint-disable-next-line no-undef
-	if (!initShaders(glm, VSHADER_SOURCE, FSHADER_SOURCE)) {
-		console.log('Failed to intialize shaders.');
-		return;
-	}
 
 	// Set clear color and enable hidden surface removal
 	gl.clearColor(0.0, 0.0, 0.0, 1.0);
-	glm.clearColor(0.0, 0.0, 0.0, 1.0);
 	gl.enable(gl.DEPTH_TEST);
-	glm.enable(gl.DEPTH_TEST);
 
 	// Enable transparency
 	gl.enable(gl.BLEND);
-	glm.enable(gl.BLEND);
-	// And mirrored...
 	gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-	glm.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
 	// Clear color and depth buffer
 	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-	// And mirrored...
-	glm.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
+	
 	// Get the storage locations of uniform attributes
 	gl.u_ModelMatrix = gl.getUniformLocation(gl.program, 'u_ModelMatrix');
 	gl.u_ViewMatrix = gl.getUniformLocation(gl.program, 'u_ViewMatrix');
 	gl.u_NormalMatrix = gl.getUniformLocation(gl.program, 'u_NormalMatrix');
 	gl.u_ProjMatrix = gl.getUniformLocation(gl.program, 'u_ProjMatrix');
 	gl.u_LightColor = gl.getUniformLocation(gl.program, 'u_LightColor');
-	gl.u_LightDirection = gl.getUniformLocation(gl.program, 'u_LightDirection');
+	gl.u_LightPosition = gl.getUniformLocation(gl.program, 'u_LightPosition');
+	gl.u_LightMatrix = gl.getUniformLocation(gl.program, 'u_LightMatrix');
+	gl.u_AmbientLight = gl.getUniformLocation(gl.program, 'u_AmbientLight');
 
-	// And mirrored...
-	glm.u_ModelMatrix = glm.getUniformLocation(glm.program, 'u_ModelMatrix');
-	glm.u_ViewMatrix = glm.getUniformLocation(glm.program, 'u_ViewMatrix');
-	glm.u_NormalMatrix = glm.getUniformLocation(glm.program, 'u_NormalMatrix');
-	glm.u_ProjMatrix = glm.getUniformLocation(glm.program, 'u_ProjMatrix');
-	glm.u_LightColor = glm.getUniformLocation(glm.program, 'u_LightColor');
-	glm.u_LightDirection = glm.getUniformLocation(glm.program, 'u_LightDirection');
-
+	
 
 	if (!gl.u_ModelMatrix || !gl.u_ViewMatrix || !gl.u_NormalMatrix ||
-      !gl.u_ProjMatrix || !gl.u_LightColor || !gl.u_LightDirection ) { 
-		console.log(!gl.u_ModelMatrix);
-		console.log(!gl.u_ViewMatrix);
-		console.log(!gl.u_NormalMatrix);
-		console.log(!gl.u_ProjMatrix);
-		console.log(!gl.u_LightColor);
-		console.log(!gl.u_LightDirection);
+      !gl.u_ProjMatrix || !gl.u_LightColor || !gl.u_LightPosition || !gl.u_AmbientLight) { 
+		console.log(gl.u_ModelMatrix);
+		console.log(gl.u_ViewMatrix);
+		console.log(gl.u_NormalMatrix);
+		console.log(gl.u_ProjMatrix);
+		console.log(gl.u_LightColor);
+		console.log(gl.u_LightPosition);
+		console.log(gl.u_AmbientLight);
 		console.log('Failed to Get the storage locations of u_ModelMatrix, u_ViewMatrix, and/or u_ProjMatrix');
 		return;
 	}
 
-	// And mirrored...
-	if (!glm.u_ModelMatrix || !glm.u_ViewMatrix || !glm.u_NormalMatrix ||
-		!glm.u_ProjMatrix || !glm.u_LightColor || !glm.u_LightDirection ) { 
-		console.log(!glm.u_ModelMatrix);
-		console.log(!glm.u_ViewMatrix);
-		console.log(!glm.u_NormalMatrix);
-		console.log(!glm.u_ProjMatrix);
-		console.log(!glm.u_LightColor);
-		console.log(!glm.u_LightDirection);
-		console.log('Failed to Get the storage locations of um_ModelMatrix, um_ViewMatrix, and/or um_ProjMatrix');
-		return;
-	}
-
-	// Set the light color (white)
-	gl.uniform3f(gl.u_LightColor, 1.0, 1.0, 1.0);
-	// And mirrored...
-	glm.uniform3f(glm.u_LightColor, 1.0, 1.0, 1.0);
-	
-
-	// Calculate the view matrix and the projection matrix
-	viewMatrix.setLookAt(0, 0, 15, 0, 0, -100, 0, 1, 0);
-	projMatrix.setPerspective(30, canvas.width/canvas.height, 1, 100);
-	// Pass the model, view, and projection matrix to the uniform variable respectively
-	gl.uniformMatrix4fv(gl.u_ViewMatrix, false, viewMatrix.elements);
-	gl.uniformMatrix4fv(gl.u_ProjMatrix, false, projMatrix.elements);
-
-	// And mirrored...
-	// Calculate the view matrix and the projection matrix
-	viewMatrix.setLookAt(0, 0, 15, 0, 0, -100, 0, 1, 0);
-	projMatrix.setPerspective(30, canvas.width/canvas.height, 1, 100);
-	// Pass the model, view, and projection matrix to the uniform variable respectively
-	gl.uniformMatrix4fv(glm.u_ViewMatrix, false, viewMatrix.elements);
-	gl.uniformMatrix4fv(glm.u_ProjMatrix, false, projMatrix.elements);
 
 	// Load seat data
 	initSeatMatrices();
@@ -216,7 +207,7 @@ function main() {
 	// 4-clear glass cube
 	for (var i = -maxTilt; i <= maxTilt; i += ANGLE_STEP){
 		shapes['water' + String(i)] = {
-			color: {r: 0.0, g: 0.5, b: 1.0, alpha: 0.5},
+			color: {r: 0.0, g: 0.5, b: 1.0, alpha: 0.1},
 			type: 'tiltedcube',
 			tilt: i
 		};
@@ -266,13 +257,9 @@ function main() {
 	
 	// Write the vertex property to buffers (coordinates, colors and normals)
 	if (!initArrayBuffer(gl, 'a_Position', new Float32Array(vertices), 3, gl.FLOAT)) return -1;
-	if (!initArrayBuffer(glm, 'a_Position', new Float32Array(vertices), 3, glm.FLOAT)) return -1;
 	if (!initArrayBuffer(gl, 'a_Color', new Float32Array(colors), 4, gl.FLOAT)) return -1;
-	if (!initArrayBuffer(glm, 'a_Color', new Float32Array(colors), 4, glm.FLOAT)) return -1;
 	if (!initArrayBuffer(gl, 'a_Normal', new Float32Array(normals), 3, gl.FLOAT)) return -1;
-	if (!initArrayBuffer(glm, 'a_Normal', new Float32Array(normals), 3, glm.FLOAT)) return -1;
 	if (!initArrayBuffer(gl, 'a_TexCoords', new Float32Array(texCoords), 2, gl.FLOAT)) return -1;
-	if (!initArrayBuffer(glm, 'a_TexCoords', new Float32Array(texCoords), 2, glm.FLOAT)) return -1;
 
 	// Write the indices to the buffer object
 	let indexBuffer = gl.createBuffer();
@@ -281,38 +268,37 @@ function main() {
 		return false;
 	}
 
-	// And mirrored...
-	let mirrorIndexBuffer = glm.createBuffer();
-	if (!mirrorIndexBuffer) {
-		console.log('Failed to create the mirror buffer object');
-		return false;
-	}
 
 	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
 	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
 
-	// And mirrored...
-	glm.bindBuffer(glm.ELEMENT_ARRAY_BUFFER, mirrorIndexBuffer);
-	glm.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+	// Set up frameBuffer for mirror
+	mirror = gl.createFramebuffer();
+	const mirrorTexWidth = 256;
+	const mirrorTextHeight = 256;
+	const mirTex = gl.createTexture();
+	gl.activeTexture(gl.TEXTURE0);
+	gl.bindTexture(gl.TEXTURE_2D, mirTex);
+	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, mirrorTexWidth, mirrorTextHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
+	gl.bindFramebuffer(gl.FRAMEBUFFER, mirror);
+	gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, mirTex, 0);
 
 	// Set up texture stuff
 	gl.u_UseTextures = gl.getUniformLocation(gl.program, 'u_UseTextures');
 	gl.u_Sampler = gl.getUniformLocation(gl.program, 'u_Sampler');
 
-	// And mirrored...
-	glm.u_UseTextures = glm.getUniformLocation(glm.program, 'u_UseTextures');
-	glm.u_Sampler = glm.getUniformLocation(glm.program, 'u_Sampler');
-
+	
 	// Load textures
 	const floorPic = new Image();
 	let floorTex = gl.createTexture();
-	let mirrorFloorTex = glm.createTexture();
 	floorPic.onload = () => {
-		loadTexture(gl, floorTex, floorPic, 0);
-		loadTexture(glm, mirrorFloorTex, floorPic, 0);
+		loadTexture(gl, floorTex, floorPic, 1);
 		floorLoaded = true;
-		draw(gl, true);
+		drawScene(gl);
 		console.log('load', floorLoaded);
 	};
 	console.log('loaded', floorLoaded);
@@ -321,12 +307,10 @@ function main() {
 
 	const wallPic = new Image();
 	let wallTex = gl.createTexture();
-	let mirrorWallTex = glm.createTexture();
 	wallPic.onload = () => {
-		loadTexture(gl, wallTex, wallPic, 1);
-		loadTexture(glm, mirrorWallTex, wallPic, 1);
+		loadTexture(gl, wallTex, wallPic, 2);
 		wallLoaded = true;
-		draw(gl, true);
+		drawScene(gl);
 	};
 	wallPic.src = '../img/blue.jpg';
 
@@ -334,36 +318,55 @@ function main() {
 
 	const fishPic = new Image();
 	let fishTex = gl.createTexture();
-	let mirrorFishTex = glm.createTexture();
 	fishPic.onload = () => {
-		loadTexture(gl, fishTex, fishPic, 2);
-		loadTexture(glm, mirrorFishTex, fishPic, 2);
+		loadTexture(gl, fishTex, fishPic, 3);
 		fishLoaded = true;
-		draw(gl, true);
+		drawScene(gl);
 	};
 	fishPic.src = '../img/fish.png';
 
-	
+	const leatherPic = new Image();
+	let leatherTex = gl.createTexture();
+	leatherPic.onload = () => {
+		loadTexture(gl, leatherTex, leatherPic, 4);
+		leatherLoaded = true;
+		drawScene(gl);
+	};
+	leatherPic.src = '../img/leather.jpg';
+
+	const tablePic = new Image();
+	let tableTex = gl.createTexture();
+	tablePic.onload = () => {
+		loadTexture(gl, tableTex, tablePic, 5);
+		tableLoaded = true;
+		drawScene(gl);
+	};
+	tablePic.src = '../img/table.jpg';
+
 	document.onkeydown = function(ev){
 		keydown(ev, gl);
 	};
 
-	draw(gl, true);
+	drawScene(gl);
 }
 
 function keydown(ev, gl) {
 	switch (ev.keyCode) {
-	case 40: // Up arrow key -> the positive rotation of arm1 around the y-axis
-		g_xAngle = (g_xAngle + ANGLE_STEP) % 360;
+	case 40: // Down arrow key -> the positive rotation of arm1 around the y-axis
+		pos.elements[0] -= FOOT_STEP * facing.elements[0];
+		pos.elements[1] -= FOOT_STEP * facing.elements[1];
+		pos.elements[2] -= FOOT_STEP * facing.elements[2];
 		break;
-	case 38: // Down arrow key -> the negative rotation of arm1 around the y-axis
-		g_xAngle = (g_xAngle - ANGLE_STEP) % 360;
+	case 38: // Up arrow key -> the negative rotation of arm1 around the y-axis
+		pos.elements[0] += FOOT_STEP * facing.elements[0];
+		pos.elements[1] += FOOT_STEP * facing.elements[1];
+		pos.elements[2] += FOOT_STEP * facing.elements[2];
 		break;
 	case 39: // Right arrow key -> the positive rotation of arm1 around the y-axis
-		g_yAngle = (g_yAngle + ANGLE_STEP) % 360;
+		facing = twist(facing, -ANGLE_STEP);
 		break;
 	case 37: // Left arrow key -> the negative rotation of arm1 around the y-axis
-		g_yAngle = (g_yAngle - ANGLE_STEP) % 360;
+		facing = twist(facing, ANGLE_STEP);
 		break;
 	case 69: // e key -> around z axis
 		g_zAngle = (g_zAngle - ANGLE_STEP) % 360;
@@ -380,11 +383,23 @@ function keydown(ev, gl) {
 	case 32: // space key -> increment animation counter
 		anim = (anim + animStep) % 1;
 		break;
+	case 76: // L key -> toggle light
+		lightOn = !lightOn;
+		break;
+	case 82: // R key -> toggle r component of light
+		light.r = light.r ? 0 : 1;
+		break;
+	case 71: // G key -> toggle g component of light
+		light.g = light.g ? 0 : 1;
+		break;
+	case 66: // B key -> toggle b component of light
+		light.b = light.b ? 0 : 1;
+		break;
 	default: return; // Skip drawing at no effective action
 	}
 
 	// Draw the scene
-	draw(gl, true);
+	drawScene(gl);
 }
 
 
@@ -440,12 +455,12 @@ function initCubeVertexBuffers(offset, colour, topTilt) {
 	];
 
 	var texCoords = [
-		1.0, 1.0,    0.0, 1.0,    1.0, 1.0,    1.0, 0.0,
-		1.0, 1.0,    0.0, 1.0,    1.0, 1.0,    1.0, 0.0,
-		1.0, 1.0,    0.0, 1.0,    1.0, 1.0,    1.0, 0.0,
-		1.0, 1.0,    0.0, 1.0,    1.0, 1.0,    1.0, 0.0,
-		1.0, 1.0,    0.0, 1.0,    1.0, 1.0,    1.0, 0.0,
-		1.0, 1.0,    0.0, 1.0,    1.0, 1.0,    1.0, 0.0
+		1.0, 0.0,    0.0, 0.0,    0.0, 1.0,    1.0, 1.0,  // v0-v1-v2-v3
+		1.0, 0.0,    0.0, 0.0,    0.0, 1.0,    1.0, 1.0,  // v0-v3-v4-v5
+		1.0, 0.0,    0.0, 0.0,    0.0, 1.0,    1.0, 1.0,  // v0-v5-v6-v1
+		1.0, 0.0,    0.0, 0.0,    0.0, 1.0,    1.0, 1.0,  // v1-v6-v7-v2
+		1.0, 0.0,    0.0, 0.0,    0.0, 1.0,    1.0, 1.0,  // v7-v4-v3-v2
+		1.0, 0.0,    0.0, 0.0,    0.0, 1.0,    1.0, 1.0    // v4-v7-v6-v5
 	];
 
 
@@ -556,13 +571,34 @@ function popMatrix() { // Retrieve the matrix from the array
 	return g_matrixStack.pop();
 }
 
-function draw(gl, drawMirror) {
+function drawScene(gl) {
+	// Set FPS
+	{
+		thisLoop = new Date();
+		fps = 1000 / (thisLoop - lastLoop);
+		lastLoop = thisLoop;
+		fpsNode.nodeValue = fps.toFixed(0);
+	}
+	// Draw to mirror framebuffer
+	// {
+	// 	gl.bindFramebuffer(gl.FRAMEBUFFER, mirror);
+	// 	gl.viewport(0, 0, 256, 256);
+	// 	const aspect = 256.0/256.0;
+	// 	draw(gl, aspect, true);
+	// }
+
+	// Draw the room
+	{
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+		const aspect = gl.canvas.width / gl.canvas.height;
+		draw(gl, aspect, mirror);
+	}
+}
+
+function draw(gl, aspect, drawMirror) {
 	// gl.uniform1i(u_Sampler, 0); // if we did we would use gl.TEXTURE0
 	
-	thisLoop = new Date();
-	fps = 1000 / (thisLoop - lastLoop);
-	lastLoop = thisLoop;
-	fpsNode.nodeValue = fps.toFixed(0);
 
 	// Clear color and depth buffer
 	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -572,7 +608,28 @@ function draw(gl, drawMirror) {
 	gl.cullFace(gl.BACK);
 
 	// Set the light direction (in the world coordinate)
-	setLightDirection(gl);
+	// setLightDirection(gl);
+
+	// Set the light color (white)
+	if(lightOn){
+		gl.uniform3f(gl.u_LightColor, light.r, light.g, light.b);
+	}else{
+		gl.uniform3f(gl.u_LightColor, 0.0, 0.0, 0.0);
+	}
+	gl.uniform4f(gl.u_LightPosition, 0.0, h, 0.0, 1.0);
+	gl.uniform3f(gl.u_AmbientLight, 0.4, 0.4, 0.4);
+	
+
+	// Calculate the view matrix and the projection matrix
+	viewMatrix.setLookAt(
+		pos.elements[0], pos.elements[1], pos.elements[2],
+		pos.elements[0] + facing.elements[0], pos.elements[1] + facing.elements[1], pos.elements[2] + facing.elements[2],
+		0, 1, 0
+	);
+	projMatrix.setPerspective(30, aspect, 1, 100);
+	// Pass the model, view, and projection matrix to the uniform variable respectively
+	gl.uniformMatrix4fv(gl.u_ViewMatrix, false, viewMatrix.elements);
+	gl.uniformMatrix4fv(gl.u_ProjMatrix, false, projMatrix.elements);
 
 	/*
 	###################################    Draw the walls and floor of the room    ###################################
@@ -584,11 +641,14 @@ function draw(gl, drawMirror) {
 	modelMatrix.rotate(g_yAngle, 0, 1, 0);
 	modelMatrix.rotate(g_zAngle, 0, 0, 1);
 
+	// Store the effect on light position
+	gl.uniformMatrix4fv(gl.u_LightMatrix, false, modelMatrix.elements);
+
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(0, -h/2, 0);
 	modelMatrix.scale(w, 1.0, d);
 	// Wooden floor-----------------------------------------------------------
-	gl.uniform1i(gl.u_Sampler, 0);
+	gl.uniform1i(gl.u_Sampler, 1);
 	if(floorLoaded) {
 		gl.uniform1i(gl.u_UseTextures, true);
 	} else {
@@ -598,13 +658,12 @@ function draw(gl, drawMirror) {
 	// -----------------------------------------------------------------------
 	modelMatrix = popMatrix();
 
-	// The rest doesn't use a texture
 	if(wallLoaded) {
 		gl.uniform1i(gl.u_UseTextures, true);
 	}else{
 		gl.uniform1i(gl.u_UseTextures, false);
 	}
-	gl.uniform1i(gl.u_Sampler, 1);
+	gl.uniform1i(gl.u_Sampler, 2);
 
 	// Make back wall
 	pushMatrix(modelMatrix);
@@ -642,7 +701,12 @@ function draw(gl, drawMirror) {
 	###################################    Draw the chair and sofa of the room    ###################################
 	*/
 
-	gl.uniform1i(gl.u_UseTextures, false);
+	if (leatherLoaded) {
+		gl.uniform1i(gl.u_UseTextures, true);
+		gl.uniform1i(gl.u_Sampler, 4);
+	}else{
+		gl.uniform1i(gl.u_UseTextures, false);
+	}
 
 	var dimensions = {
 		x: 0.3,
@@ -654,10 +718,14 @@ function draw(gl, drawMirror) {
 	var heightParabola = 6 * (anim * (1 - anim)) - 1;
 
 	var positions = [
-		[-0.8, -1, -0.6, 80],
-		[-0.8, -1, 0.1, 100],
-		[-0.3, -1, 0.6, 165],
-		[0.2, -1, 0.7, 190]
+		//x pos, y pos, z pos, angle
+		[-0.8, -1, -0.65, 80],
+		[-0.8, -1, 0.05, 100],
+		[-0.75, -1, 0.4, 135],
+		[-0.3, -1, 0.75, 165],
+		[0.05, -1, 0.75, 180],
+		[0.4, -1, 0.7, 190],
+		[0.8, -1, 0.5, 225]
 	];
 
 	for (var i in positions){
@@ -672,12 +740,28 @@ function draw(gl, drawMirror) {
 		modelMatrix = popMatrix();
 	}
 
+	gl.uniform1i(gl.u_UseTextures, false);
+
+	// Move the table and things on the table to the side--------------------------------
+	pushMatrix(modelMatrix);
+	modelMatrix.translate(0.7*w/2, 0, -0.3*d/2);
+	modelMatrix.rotate(90, 0, 1, 0);
+
 	// Table
+	if (tableLoaded) {
+		gl.uniform1i(gl.u_UseTextures, true);
+		gl.uniform1i(gl.u_Sampler, 5);
+	} else {
+		gl.uniform1i(gl.u_UseTextures, false);
+	}
+
 	dimensions = {x: 2, y: 1, z: 1};
 	pushMatrix(modelMatrix);
 	modelMatrix.translate(0, -h/2, 0);
 	var tableHeight = drawTable(gl, dimensions);
 	modelMatrix = popMatrix();
+
+	gl.uniform1i(gl.u_UseTextures, false);
 
 	// Fish tank
 	var tankHeight = 1;
@@ -687,16 +771,25 @@ function draw(gl, drawMirror) {
 	drawFishTank(gl, dimensions, tankTilt);
 	modelMatrix = popMatrix();
 
+	modelMatrix = popMatrix();
+
+	// Table moving over-----------------------------------------------------------------
+
+	dimensions = {x: 3, y: 3, z: 3};
+	pushMatrix(modelMatrix);
+	modelMatrix.translate(0, -h/2, -0.8 * d/2);
+	drawTV(gl, dimensions, true);
+	modelMatrix = popMatrix();
+
 	// Mirror
-	if (drawMirror) {
+	if (!drawMirror) {
 		pushMatrix(modelMatrix);
 		modelMatrix.translate(0, 0, 0.01-d/2);
 		modelMatrix.rotate(180, 0, 1, 0);
 		modelMatrix.rotate(-90, 1, 0, 0);
 
-		let mirTex = gl.createTexture();
-		loadTexture(gl, mirTex, glm.canvas, 3);
-		gl.uniform1i(gl.u_Sampler, 3);
+		gl.uniform1i(gl.u_Sampler, 0);
+		gl.uniform1i(gl.u_UseTextures, true);
 		drawshape(gl, 'mirror');
 		modelMatrix = popMatrix();
 	}
@@ -720,9 +813,6 @@ function drawshape(gl, name) {
 
 	// console.log(name + ' ' + n + ' ' + offset);
 	gl.drawElements(gl.TRIANGLES, n, gl.UNSIGNED_SHORT, offset*2);
-	if (name !== 'mirror') {
-		glm.drawElements(glm.TRIANGLES, n, glm.UNSIGNED_BYTE, offset*2);
-	}
 
 	modelMatrix = popMatrix();
 }
@@ -819,8 +909,8 @@ function drawTable(gl, dimensions) {
 
 function drawFishTank(gl, dimensions, tilt) {
 	pushMatrix(modelMatrix);
-	var gt = 0.1;
-	var depth = 0.6;
+	var gt = 0.05;
+	var depth = 0.72;
 	// Apply tilt
 	if (tilt > 0){
 		modelMatrix.translate(-dimensions.x/2, 0, 0);
@@ -835,6 +925,25 @@ function drawFishTank(gl, dimensions, tilt) {
 	var choice = 'water' + String(tilt);
 	// console.log(choice);
 	modelMatrix.scale(dimensions.x, dimensions.y, dimensions.z);
+
+	// Tim the fish
+	if (fishLoaded) {
+		gl.uniform1i(gl.u_Sampler, 3);
+		gl.uniform1i(gl.u_UseTextures, true);
+		gl.disable(gl.CULL_FACE);
+		// Position Tim
+		pushMatrix(modelMatrix);
+		modelMatrix.scale(1.0, depth, 1.0);
+		modelMatrix.scale(1/dimensions.x, 1/dimensions.y, 1/dimensions.z);
+		modelMatrix.translate(0, -(1-depth-gt/2)/4 + dimensions.y/2, 0);
+		modelMatrix.rotate(-90, 1, 0, 0);
+		drawshape(gl, 'fish');
+		modelMatrix = popMatrix();
+
+		gl.enable(gl.CULL_FACE);
+		gl.cullFace(gl.BACK);
+		gl.uniform1i(gl.u_UseTextures, false);
+	}
 
 	// Fish tank - water
 	pushMatrix(modelMatrix);
@@ -851,104 +960,87 @@ function drawFishTank(gl, dimensions, tilt) {
 	modelMatrix = popMatrix();
 
 	modelMatrix = popMatrix();
-
-	// Tim the fish
-	if (fishLoaded) {
-		gl.uniform1i(gl.u_Sampler, 2);
-		gl.uniform1i(gl.u_UseTextures, true);
-		gl.disable(gl.CULL_FACE);
-		// Position Tim
-		pushMatrix(modelMatrix);
-		modelMatrix.translate(0, -(1-depth-gt/2)/2 + dimensions.y/2, 0);
-		modelMatrix.rotate(-90, 1, 0, 0);
-		drawshape(gl, 'fish');
-		modelMatrix = popMatrix();
-
-		gl.enable(gl.CULL_FACE);
-		gl.cullFace(gl.BACK);
-	}
 }
 
-function setLightDirection(gl) {
-	// eslint-disable-next-line no-undef
-	var lightDirection = new Vector3([2.0, 3.0, 4.0]);
-	// eslint-disable-next-line no-undef
-	var lightMatrix = new Matrix4();
-	lightMatrix.setRotate(g_xAngle, 1, 0, 0);
-	lightMatrix.rotate(g_yAngle, 0, 1, 0);
+function drawTV(gl, dimensions, on) {
+	// Scale TV
+	pushMatrix(modelMatrix);
+	modelMatrix.scale(dimensions.x, dimensions.y, dimensions.z);
 
-	var x = lightDirection.elements[0];
-	var y = lightDirection.elements[1];
-	var z = lightDirection.elements[2];
-	// eslint-disable-next-line no-undef
-	var rotatedLightDir = transformPoint(new Vector3([x, y, z]), new Matrix4(lightMatrix));
-	rotatedLightDir.normalize();
-	gl.uniform3fv(gl.u_LightDirection, rotatedLightDir.elements);
+	// Draw base
+	pushMatrix(modelMatrix);
+	let baseHeight = 0.2;
+	modelMatrix.translate(0.0, baseHeight/2, 0.0);
+	modelMatrix.scale(1.0, baseHeight, 0.6);
+	drawshape(gl, 'tv');
+	modelMatrix = popMatrix();
+
+	// Draw stand
+	pushMatrix(modelMatrix);
+	let standHeight = 0.4;
+	modelMatrix.translate(0.0, baseHeight/2 + standHeight/2, 0.0);
+	modelMatrix.scale(0.2, standHeight, 0.2);
+	drawshape(gl, 'tv');
+	modelMatrix = popMatrix();
+
+	// Draw behind screen
+	pushMatrix(modelMatrix);
+	let height = 1.0;
+	let width = 1.5;
+	let depth = 0.2;
+	modelMatrix.translate(0.0, baseHeight/2 + standHeight/2 + height/2, 0.0);
+	modelMatrix.scale(width, height, depth);
+	drawshape(gl, 'tv');
+	modelMatrix = popMatrix();
+
+	// Draw the screen
+	pushMatrix(modelMatrix);
+	let border = 0.1;
+	let standOut = 0.01;
+	modelMatrix.translate(0.0, baseHeight/2 + standHeight/2 + height/2, depth + standOut);
+	modelMatrix.scale(width - border, height - border, 1.0);
+	modelMatrix.rotate(90, 1, 0, 0);
+	drawshape(gl, 'screen');
+	modelMatrix = popMatrix();
+
+	modelMatrix = popMatrix();
 }
 
-function transformPoint(point, m) {
-	var elements = new Float32Array([point.elements[0], point.elements[1], point.elements[2], 1,    0, 0, 0, 0,    0, 0, 0, 0,    0, 0, 0, 0]);
+function twist(vec, deg) {
 	// eslint-disable-next-line no-undef
-	var pointMatrix = new Matrix4({elements: elements});
-	var transformation = m.concat(pointMatrix);
+	let twister = new Matrix4();
+	twister.setRotate(deg, 0, 1, 0);
+
 	// eslint-disable-next-line no-undef
-	return new Vector3([
-		transformation.elements[0],
-		transformation.elements[1],
-		transformation.elements[2],
-	]);
+	let twisted = twister.multiplyVector3(vec);
+	return twisted;
 }
 
-//
-// Initialize a texture and load an image.
-// When the image finished loading copy it into the texture.
-//
-// function loadTexture(gl, texture, image, texUnit) {
-// 	gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);// Flip the image's y-axis
-// 	// Make the texture unit active
-// 	switch(texUnit){
-// 	case 0:
-// 		gl.activeTexture(gl.TEXTURE0);
-// 		break;
-// 	case 1:
-// 		gl.activeTexture(gl.TEXTURE1);
-// 		break;
-// 	case 2:
-// 		gl.activeTexture(gl.TEXTURE2);
-// 		break;
-// 	default:
-// 		gl.activeTexture(gl.TEXTURE3);
-// 		break;
-// 	}
-	
-// 	// Bind the texture object to the target
-// 	gl.bindTexture(gl.TEXTURE_2D, texture);
-// 	// Set the image to texture
-// 	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-// 	// Set texture parameters
-// 	gl.generateMipmap(gl.TEXTURE_2D);
-// 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-// 	if (texUnit !== 2){
-// 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-// 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);	
-// 	}
-// }
 
 function loadTexture(gl, texture, image, texUnit) {
 	gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);// Flip the image's y-axis
 	// Make the texture unit active
 	switch(texUnit){
-	case 0:
-		gl.activeTexture(gl.TEXTURE0);
-		break;
 	case 1:
 		gl.activeTexture(gl.TEXTURE1);
 		break;
 	case 2:
 		gl.activeTexture(gl.TEXTURE2);
 		break;
-	default:
+	case 3:
 		gl.activeTexture(gl.TEXTURE3);
+		break;
+	case 4:
+		gl.activeTexture(gl.TEXTURE4);
+		break;
+	case 5:
+		gl.activeTexture(gl.TEXTURE5);
+		break;
+	case 6:
+		gl.activeTexture(gl.TEXTURE6);
+		break;
+	default:
+		gl.activeTexture(gl.TEXTURE7);
 		break;
 	}
 
